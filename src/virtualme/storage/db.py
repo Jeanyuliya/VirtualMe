@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -82,10 +84,65 @@ def _schema_path() -> Path:
     return Path(__file__).with_name("schema.sql")
 
 
+async def _apply_schema_migrations(conn: aiosqlite.Connection) -> None:
+    """Idempotent inline schema migrations.
+
+    Aligned with memory-hall's pattern: read existing columns via
+    PRAGMA table_info, then apply any migrations whose target column
+    is missing. Race-safe via try/except on duplicate column.
+
+    Runs on every init_db() call. Adding a new migration = append a
+    tuple to the relevant table's list below.
+
+    Per memory-hall convention, migrations/*.sql files in repo root
+    are human-readable documentation, NOT executed by this function.
+    """
+    cursor = await conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='anchors'"
+    )
+    if not await cursor.fetchone():
+        return
+
+    # Anchors table migrations
+    cursor = await conn.execute("PRAGMA table_info(anchors)")
+    existing_anchor_columns = {row[1] for row in await cursor.fetchall()}
+
+    anchor_migrations: list[tuple[str, str]] = [
+        (
+            "source_question_ids",
+            "ALTER TABLE anchors "
+            "ADD COLUMN source_question_ids TEXT NOT NULL DEFAULT '[]'",
+        ),
+        # v0.5+ anchor migrations append here
+    ]
+
+    for column_name, sql in anchor_migrations:
+        if column_name in existing_anchor_columns:
+            continue
+        try:
+            await conn.execute(sql)
+        except aiosqlite.OperationalError as exc:
+            # Race condition: another process added the column between
+            # our PRAGMA check and ALTER. Treat as already-migrated.
+            if "duplicate column" not in str(exc).lower():
+                raise
+
+
 async def init_db(path: str) -> None:
+    """Initialize SQLite DB: pragmas, schema, migrations."""
     Path(path).parent.mkdir(parents=True, exist_ok=True)
     async with aiosqlite.connect(path) as conn:
+        # Pragma defaults aligned with memory-hall best practices.
+        # WAL improves concurrent reader throughput.
+        # synchronous=NORMAL trades crash durability for write speed
+        # (acceptable for personal-scale local DB).
+        # busy_timeout avoids "database is locked" on transient contention.
+        await conn.execute("PRAGMA journal_mode=WAL;")
+        await conn.execute("PRAGMA synchronous=NORMAL;")
+        await conn.execute("PRAGMA busy_timeout=5000;")
+
         await conn.executescript(_schema_path().read_text())
+        await _apply_schema_migrations(conn)
         await conn.commit()
 
 
@@ -93,12 +150,29 @@ class DB:
     def __init__(self, path: str):
         self.path = path
 
+    @asynccontextmanager
+    async def _connect(self) -> AsyncIterator[aiosqlite.Connection]:
+        """Open a connection with memhall-aligned per-connection pragmas.
+
+        Per Gemini v3 pivot review: `synchronous=NORMAL` and `busy_timeout`
+        are per-connection settings in SQLite, NOT persistent. Applying them
+        only in init_db() leaves all subsequent writes running with
+        synchronous=FULL (slower) and busy_timeout=0 (lock-prone). This
+        helper ensures every DB method gets the right pragmas.
+
+        WAL mode is set once via init_db() — it persists in the DB file.
+        """
+        async with aiosqlite.connect(self.path) as conn:
+            await conn.execute("PRAGMA synchronous=NORMAL;")
+            await conn.execute("PRAGMA busy_timeout=5000;")
+            yield conn
+
     async def init(self) -> None:
         await init_db(self.path)
 
     async def get_or_create_session(self, interviewee_id: str, week: int) -> Session:
         await self.init()
-        async with aiosqlite.connect(self.path) as conn:
+        async with self._connect() as conn:
             conn.row_factory = aiosqlite.Row
             await conn.execute(
                 "INSERT OR IGNORE INTO sessions(interviewee_id, week) VALUES (?, ?)",
@@ -115,7 +189,7 @@ class DB:
 
     async def save_turn(self, session_id: int, role: str, content: str) -> Turn:
         digest = hashlib.sha256(f"{session_id}:{role}:{content}".encode()).hexdigest()
-        async with aiosqlite.connect(self.path) as conn:
+        async with self._connect() as conn:
             conn.row_factory = aiosqlite.Row
             await conn.execute(
                 """
@@ -133,7 +207,7 @@ class DB:
     async def save_redactions(self, turn_id: int, redactions: list[Redaction]) -> None:
         if not redactions:
             return
-        async with aiosqlite.connect(self.path) as conn:
+        async with self._connect() as conn:
             await conn.executemany(
                 """
                 INSERT INTO redactions(
@@ -165,7 +239,7 @@ class DB:
         source_question_ids: list[str] | None = None,
     ) -> Anchor:
         question_ids = source_question_ids if source_question_ids is not None else []
-        async with aiosqlite.connect(self.path) as conn:
+        async with self._connect() as conn:
             cur = await conn.execute(
                 """
                 INSERT INTO anchors(interviewee_id, dimension, layer, content, source_turn_ids, source_question_ids)
@@ -188,7 +262,7 @@ class DB:
         from virtualme.interview.triples import PersonaTriple
 
         parsed = triple if isinstance(triple, PersonaTriple) else PersonaTriple(**triple)
-        async with aiosqlite.connect(self.path) as conn:
+        async with self._connect() as conn:
             await conn.execute(
                 """
                 INSERT INTO persona_triples(
@@ -210,7 +284,7 @@ class DB:
     async def load_triples(self, interviewee_id: str):
         from virtualme.interview.triples import PersonaTriple
 
-        async with aiosqlite.connect(self.path) as conn:
+        async with self._connect() as conn:
             conn.row_factory = aiosqlite.Row
             cur = await conn.execute(
                 "SELECT * FROM persona_triples WHERE interviewee_id = ? ORDER BY created_at",
@@ -231,7 +305,7 @@ class DB:
         ]
 
     async def update_triple_embedding(self, triple_id: int, embedding: bytes) -> None:
-        async with aiosqlite.connect(self.path) as conn:
+        async with self._connect() as conn:
             await conn.execute(
                 "UPDATE persona_triples SET embedding = ? WHERE id = ?",
                 (embedding, triple_id),
@@ -239,7 +313,7 @@ class DB:
             await conn.commit()
 
     async def mark_triangulated(self, anchor_id: int) -> None:
-        async with aiosqlite.connect(self.path) as conn:
+        async with self._connect() as conn:
             await conn.execute("UPDATE anchors SET triangulated = 1 WHERE id = ?", (anchor_id,))
             await conn.commit()
 
@@ -267,14 +341,14 @@ class DB:
         return {dimension: 1.0 - (len(items) / max_count) for dimension, items in summary.items()}
 
     async def count_turns(self, session_id: int) -> int:
-        async with aiosqlite.connect(self.path) as conn:
+        async with self._connect() as conn:
             row = await (
                 await conn.execute("SELECT COUNT(*) AS count FROM turns WHERE session_id = ?", (session_id,))
             ).fetchone()
         return int(row[0])
 
     async def load_recent_turns(self, session_id: int, limit: int = 10) -> list[Turn]:
-        async with aiosqlite.connect(self.path) as conn:
+        async with self._connect() as conn:
             conn.row_factory = aiosqlite.Row
             cur = await conn.execute(
                 """
@@ -289,7 +363,7 @@ class DB:
         return [Turn(**dict(row)) for row in reversed(rows)]
 
     async def load_session_turns(self, session_id: int) -> list[Turn]:
-        async with aiosqlite.connect(self.path) as conn:
+        async with self._connect() as conn:
             conn.row_factory = aiosqlite.Row
             cur = await conn.execute(
                 "SELECT * FROM turns WHERE session_id = ? ORDER BY id",
@@ -299,7 +373,7 @@ class DB:
         return [Turn(**dict(row)) for row in rows]
 
     async def mark_session_completed(self, session_id: int) -> None:
-        async with aiosqlite.connect(self.path) as conn:
+        async with self._connect() as conn:
             await conn.execute(
                 """
                 UPDATE sessions
@@ -311,7 +385,7 @@ class DB:
             await conn.commit()
 
     async def load_stale_active_sessions(self, threshold_minutes: int = 30) -> list[Session]:
-        async with aiosqlite.connect(self.path) as conn:
+        async with self._connect() as conn:
             conn.row_factory = aiosqlite.Row
             cur = await conn.execute(
                 """
@@ -334,7 +408,7 @@ class DB:
             if triangulated is not None
             else (interviewee_id,)
         )
-        async with aiosqlite.connect(self.path) as conn:
+        async with self._connect() as conn:
             conn.row_factory = aiosqlite.Row
             cur = await conn.execute(
                 f"SELECT * FROM anchors WHERE interviewee_id = ? {clause} ORDER BY created_at",
@@ -344,7 +418,12 @@ class DB:
 
 
 def _anchor_from_row(row: aiosqlite.Row) -> Anchor:
-    source_question_ids_raw = row["source_question_ids"] if "source_question_ids" in row.keys() else "[]"
+    # aiosqlite.Row has no .get() method, so use ternary on `in` check.
+    source_question_ids_raw = (
+        row["source_question_ids"]  # noqa: SIM401
+        if "source_question_ids" in row
+        else "[]"
+    )
     return Anchor(
         id=row["id"],
         interviewee_id=row["interviewee_id"],

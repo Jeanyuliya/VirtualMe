@@ -1,7 +1,6 @@
 """Tests for triangulation uniqueness fix — issue #3."""
-import pytest
-from virtualme.storage.db import Anchor, Dimension, Layer
 from virtualme.interview.follow_up import _has_triangulated_repeat
+from virtualme.storage.db import Anchor, Dimension, Layer
 
 
 class TestHasTriangulatedRepeat:
