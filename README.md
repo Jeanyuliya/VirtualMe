@@ -157,6 +157,34 @@ python scripts/init_db.py --path ./data/virtualme.db
 python -m virtualme.cli --interviewee yourself
 ```
 
+### 本機 demo flow
+
+訪談累積資料後，可以先輸出 markdown archive，再準備一次手動 blind test：
+
+```bash
+# 匯出目前 anchors / triangulated principles
+python -m virtualme.export \
+  --db sqlite:///./data/virtualme.db \
+  --interviewee yourself \
+  --out ./exports
+
+# 產生 blind-test operator 材料
+python -m virtualme.blind_test.prepare \
+  --db sqlite:///./data/virtualme.db \
+  --interviewee yourself \
+  --week 5 \
+  --out ./exports/blind-test
+
+# 手動 blind test 跑完後，記錄結果
+python -m virtualme.blind_test \
+  --db sqlite:///./data/virtualme.db \
+  --interviewee yourself \
+  --week 5 \
+  --results T1=1,T2=0,T3=1,T4=0,T5=1
+```
+
+`blind_test.prepare` 只產生 `instructions.md`、`scorecard.md`、`persona-context.md`，不呼叫 LLM、不產生 scenario、不做 shuffle。
+
 接 LINE / Telegram / 其他 messaging platform → 改 `src/virtualme/transport/`。
 
 ---

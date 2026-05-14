@@ -14,15 +14,16 @@ VirtualMe now has the minimum loop needed for local PoC validation:
 - Session current-question tracking.
 - Minimal markdown export.
 - Minimal blind-test result recorder.
+- Minimal blind-test preparation export.
 
 Validation baseline:
 
-- `.venv/bin/python -m pytest -q` -> 84 passed
+- `.venv/bin/python -m pytest -q` -> 91 passed
 - `.venv/bin/ruff check src tests` -> passed
 
-## Recommended Next Slice
+## Recently Completed
 
-### 1. Add a tiny blind-test preparation export
+### 1. Tiny blind-test preparation export
 
 Build on the existing markdown exporter and blind-test recorder, but do not generate scenarios yet.
 
@@ -50,9 +51,11 @@ Why this is next:
 
 Acceptance criteria:
 
-- Does not require `ANTHROPIC_API_KEY` when `--db` is provided.
-- Produces deterministic markdown files.
-- Has focused tests for generated file names and scorecard rows.
+- Does not require `ANTHROPIC_API_KEY` when `--db` is provided. Done.
+- Produces deterministic markdown files. Done.
+- Has focused tests for generated file names and scorecard rows. Done.
+
+This is implemented in `src/virtualme/blind_test/prepare.py`.
 
 ## Useful But Not Urgent
 
