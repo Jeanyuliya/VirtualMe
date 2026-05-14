@@ -1,31 +1,15 @@
 import asyncio
-from pathlib import Path
 
 from anthropic import AsyncAnthropic
 
 from virtualme.config import Settings, sqlite_path
 from virtualme.interview.bot import process_turn
 from virtualme.interview.question_selector import QuestionSelector, load_question_pool
-from virtualme.storage.db import DB, Dimension, Question
+from virtualme.storage.db import DB
 
 
 def _selector() -> QuestionSelector:
-    path = Path("specs/question-pool.yaml")
-    if path.exists():
-        return QuestionSelector(load_question_pool(path))
-    return QuestionSelector(
-        {
-            1: [
-                Question(
-                    id="STATE-OPEN",
-                    week=1,
-                    dimension=Dimension.STATE,
-                    text="How has your work been this past week?",
-                    energy_tax="low",
-                )
-            ]
-        }
-    )
+    return QuestionSelector(load_question_pool())
 
 
 async def main() -> None:

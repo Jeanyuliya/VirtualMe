@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import random
+from importlib.resources import files
 from pathlib import Path
+from typing import Any
 
 import yaml
 
@@ -37,17 +39,33 @@ class QuestionSelector:
             state = _prefer_dimension(questions, Dimension.STATE)
             if state:
                 return state
-        target = _biggest_gap(accumulated_anchors)
+        target = _biggest_gap(accumulated_anchors, questions)
         return _prefer_dimension(questions, target) or questions[0]
 
 
-def load_question_pool(path: str | Path) -> dict[int, list[Question]]:
-    raw = yaml.safe_load(Path(path).read_text()) or []
+def default_question_pool_path() -> Path:
+    return Path(str(files("virtualme").joinpath("data/question-pool.yaml")))
+
+
+def load_question_pool(path: str | Path | None = None) -> dict[int, list[Question]]:
+    source = default_question_pool_path() if path is None else Path(path)
+    raw = yaml.safe_load(source.read_text(encoding="utf-8")) or []
+    items = _question_items(raw)
     pool: dict[int, list[Question]] = {}
-    for item in raw:
+    for item in items:
         question = Question(**item)
         pool.setdefault(question.week, []).append(question)
     return pool
+
+
+def _question_items(raw: Any) -> list[dict[str, Any]]:
+    if isinstance(raw, list):
+        return raw
+    if isinstance(raw, dict):
+        questions = raw.get("questions", [])
+        if isinstance(questions, list):
+            return questions
+    raise ValueError("question pool YAML must be a list or contain a questions list")
 
 
 def _has_unexplored_layer(anchors: dict[Dimension, list[Anchor]]) -> bool:
@@ -71,8 +89,9 @@ def _neighbor_dimension(answer: str) -> Dimension | None:
     return None
 
 
-def _biggest_gap(anchors: dict[Dimension, list[Anchor]]) -> Dimension:
-    counts = {dimension: len(anchors.get(dimension, [])) for dimension in Dimension}
+def _biggest_gap(anchors: dict[Dimension, list[Anchor]], questions: list[Question]) -> Dimension:
+    candidate_dimensions = {question.dimension for question in questions} or set(Dimension)
+    counts = {dimension: len(anchors.get(dimension, [])) for dimension in candidate_dimensions}
     return min(counts, key=counts.get)
 
 

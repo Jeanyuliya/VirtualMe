@@ -1,4 +1,10 @@
-from virtualme.interview.question_selector import QuestionSelector
+import pytest
+
+from virtualme.interview.question_selector import (
+    QuestionSelector,
+    default_question_pool_path,
+    load_question_pool,
+)
 from virtualme.storage.db import Anchor, Dimension, Layer, Question, Session
 
 
@@ -52,3 +58,37 @@ def test_low_energy_switches_to_light_topic():
         }
     )
     assert selector.select_next(_session(), None, {}, energy=2).dimension == Dimension.STATE
+
+
+def test_load_packaged_question_pool_uses_current_yaml_shape():
+    pool = load_question_pool()
+
+    assert default_question_pool_path().name == "question-pool.yaml"
+    assert 1 in pool
+    assert pool[1][0].id == "H1"
+    assert pool[1][0].dimension == Dimension.HISTORY
+
+
+def test_load_question_pool_supports_legacy_root_list(tmp_path):
+    path = tmp_path / "questions.yaml"
+    path.write_text(
+        """
+        - id: Q1
+          week: 1
+          dimension: STATE
+          text: How are you?
+        """,
+        encoding="utf-8",
+    )
+
+    pool = load_question_pool(path)
+
+    assert pool[1][0].id == "Q1"
+
+
+def test_load_question_pool_rejects_invalid_shape(tmp_path):
+    path = tmp_path / "questions.yaml"
+    path.write_text("version: 1\nquestions: nope\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="questions list"):
+        load_question_pool(path)

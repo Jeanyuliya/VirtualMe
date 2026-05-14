@@ -31,8 +31,10 @@ def _line_body(reply_token: str | None = "reply-token") -> bytes:
         "type": "message",
         "mode": "active",
         "timestamp": 1,
+        "webhookEventId": "01FZ74A0TDDPYRVKNK77XKC3ZR",
+        "deliveryContext": {"isRedelivery": False},
         "source": {"type": "user", "userId": "U123"},
-        "message": {"id": "m1", "type": "text", "text": "hello"},
+        "message": {"id": "m1", "type": "text", "text": "hello", "quoteToken": "quote-token"},
     }
     if reply_token is not None:
         event["replyToken"] = reply_token

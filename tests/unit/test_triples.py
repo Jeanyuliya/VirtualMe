@@ -62,4 +62,4 @@ async def test_triple_persistence_roundtrip(tmp_path):
     )
     await db.save_triple(triple)
     loaded = await db.load_triples("u1")
-    assert loaded[0].model_dump(exclude={"id"}) == triple.model_dump()
+    assert loaded[0].model_dump(exclude={"id"}) == triple.model_dump(exclude={"id"})

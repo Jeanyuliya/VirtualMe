@@ -1,5 +1,3 @@
-from pathlib import Path
-
 from anthropic import AsyncAnthropic
 from fastapi import FastAPI, HTTPException, Request
 
@@ -12,8 +10,7 @@ from virtualme.transport.line import handle_line_webhook
 settings = Settings()
 db = DB(sqlite_path(settings.database_url))
 claude = AsyncAnthropic(api_key=settings.anthropic_api_key.get_secret_value())
-question_pool_path = Path("specs/question-pool.yaml")
-selector = QuestionSelector(load_question_pool(question_pool_path) if question_pool_path.exists() else {})
+selector = QuestionSelector(load_question_pool())
 app = FastAPI(title="VirtualMe", version=__version__)
 
 

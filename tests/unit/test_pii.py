@@ -67,7 +67,7 @@ def test_existing_placeholder_is_idempotent():
 
 def test_over_redaction_guard_falls_back_to_original(caplog):
     caplog.set_level(logging.WARNING)
-    text = "John Smith Jane Doe 王小明"
+    text = "John Smith 0912-345-678 maki@example.com"
     result = scrub_pii(text)
     assert result.scrubbed_text == text
     assert result.redactions == []
