@@ -1,0 +1,70 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+env/
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Environment
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# SQLite databases (local data)
+*.db
+*.db-shm
+*.db-wal
+data/
+sessions/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# Logs
+*.log
+logs/
+
+# OS
+Thumbs.db
+
+# Project-specific
+# Never commit actual interview transcripts or extracted SOUL/VOICE/SKILL files
+artifacts/
+transcripts/
+*.transcript.md
+SOUL-*.md
+VOICE-*.md
+SKILL-*.md
+PEOPLE-*.md
+HISTORY-*.md
+JOURNAL-*.md
+BOUNDARIES-*.md
+STATE-*.md
+!specs/**/SOUL.md
+!specs/**/VOICE.md
+!specs/**/SKILL.md
+!specs/**/PEOPLE.md
+!specs/**/HISTORY.md
+!specs/**/JOURNAL.md
+!specs/**/BOUNDARIES.md
+!specs/**/STATE.md
+
+# Internal working dir (not for public)
+concept-for-chatgpt-diagram.md
+
+# Claude Code local settings (operator-specific MCP refs, not for public)
+.claude/
