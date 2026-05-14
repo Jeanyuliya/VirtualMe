@@ -101,12 +101,35 @@ async def _apply_schema_migrations(conn: aiosqlite.Connection) -> None:
     are human-readable documentation, NOT executed by this function.
     """
     cursor = await conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='sessions'"
+    )
+    if await cursor.fetchone():
+        cursor = await conn.execute("PRAGMA table_info(sessions)")
+        existing_session_columns = {row[1] for row in await cursor.fetchall()}
+
+        session_migrations: list[tuple[str, str]] = [
+            (
+                "current_question_id",
+                "ALTER TABLE sessions ADD COLUMN current_question_id TEXT",
+            ),
+        ]
+
+        for column_name, sql in session_migrations:
+            if column_name in existing_session_columns:
+                continue
+            try:
+                await conn.execute(sql)
+            except aiosqlite.OperationalError as exc:
+                if "duplicate column" not in str(exc).lower():
+                    raise
+
+    # Anchors table migrations
+    cursor = await conn.execute(
         "SELECT name FROM sqlite_master WHERE type='table' AND name='anchors'"
     )
     if not await cursor.fetchone():
         return
 
-    # Anchors table migrations
     cursor = await conn.execute("PRAGMA table_info(anchors)")
     existing_anchor_columns = {row[1] for row in await cursor.fetchall()}
 
@@ -206,6 +229,24 @@ class DB:
             ).fetchone()
         completed_week = row[0] if row and row[0] is not None else 0
         return max(1, min(int(completed_week) + 1, max_week))
+
+    async def get_current_question_id(self, session_id: int) -> str | None:
+        async with self._connect() as conn:
+            row = await (
+                await conn.execute(
+                    "SELECT current_question_id FROM sessions WHERE id = ?",
+                    (session_id,),
+                )
+            ).fetchone()
+        return str(row[0]) if row and row[0] else None
+
+    async def set_current_question_id(self, session_id: int, question_id: str) -> None:
+        async with self._connect() as conn:
+            await conn.execute(
+                "UPDATE sessions SET current_question_id = ? WHERE id = ?",
+                (question_id, session_id),
+            )
+            await conn.commit()
 
     async def save_turn(self, session_id: int, role: str, content: str) -> Turn:
         digest = hashlib.sha256(f"{session_id}:{role}:{content}".encode()).hexdigest()
@@ -527,11 +568,9 @@ class DB:
 
 
 def _anchor_from_row(row: aiosqlite.Row) -> Anchor:
-    # aiosqlite.Row has no .get() method, so use ternary on `in` check.
+    row_keys = set(row.keys())
     source_question_ids_raw = (
-        row["source_question_ids"]  # noqa: SIM401
-        if "source_question_ids" in row
-        else "[]"
+        row["source_question_ids"] if "source_question_ids" in row_keys else "[]"
     )
     return Anchor(
         id=row["id"],

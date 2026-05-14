@@ -51,7 +51,7 @@ async def process_turn(
     await db.save_redactions(user_turn.id, scrub_result.redactions)
 
     anchors_by_dimension = await db.load_anchors_summary(interviewee_id)
-    current_question = _current_question(selector, session.week)
+    current_question = await _resolve_current_question(db, selector, session.id, session.week)
     depth = await evaluate_depth(scrub_result.scrubbed_text, current_question.text, claude)
     all_anchors = [anchor for anchors in anchors_by_dimension.values() for anchor in anchors]
     rule = select_rule(scrub_result.scrubbed_text, depth, all_anchors)
@@ -74,6 +74,8 @@ async def process_turn(
             anchors_by_dimension,
             energy=5,
         )
+        if next_question is not None:
+            await db.set_current_question_id(session.id, next_question.id)
         if settings.use_ppa:
             from virtualme.interview.ppa import ppa_response
             from virtualme.interview.reinjection import build_reinjection_anchor, should_reinject
@@ -104,8 +106,19 @@ async def process_turn(
     return reply
 
 
-def _current_question(selector: QuestionSelector, week: int) -> Question:
+async def _resolve_current_question(
+    db: DB, selector: QuestionSelector, session_id: int, week: int
+) -> Question:
+    question_id = await db.get_current_question_id(session_id)
+    if question_id:
+        for question in _all_questions(selector):
+            if question.id == question_id:
+                return question
     return (selector.question_pool.get(week) or [DEFAULT_QUESTION])[0]
+
+
+def _all_questions(selector: QuestionSelector) -> list[Question]:
+    return [question for questions in selector.question_pool.values() for question in questions]
 
 
 async def _final_reply(

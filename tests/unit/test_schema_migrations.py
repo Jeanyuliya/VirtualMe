@@ -28,6 +28,25 @@ async def _create_v041_anchors(db_path: str) -> None:
         await conn.commit()
 
 
+async def _create_v043_sessions(db_path: str) -> None:
+    """sessions table -- WITHOUT current_question_id."""
+    async with aiosqlite.connect(db_path) as conn:
+        await conn.execute("""
+            CREATE TABLE sessions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                interviewee_id TEXT NOT NULL,
+                week INTEGER NOT NULL,
+                started_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                ended_at TEXT,
+                status TEXT NOT NULL DEFAULT 'active',
+                energy_score INTEGER,
+                notes TEXT,
+                UNIQUE(interviewee_id, week)
+            )
+        """)
+        await conn.commit()
+
+
 async def _create_v042_anchors(db_path: str) -> None:
     """v0.4.2 anchors table -- WITH source_question_ids."""
     async with aiosqlite.connect(db_path) as conn:
@@ -131,3 +150,15 @@ async def test_migration_handles_duplicate_column_race(tmp_path):
         await conn.commit()
 
     assert await _column_exists(str(db), "anchors", "source_question_ids")
+
+
+async def test_migration_adds_current_question_id_to_sessions(tmp_path):
+    db = tmp_path / "sessions.db"
+    await _create_v043_sessions(str(db))
+    assert not await _column_exists(str(db), "sessions", "current_question_id")
+
+    async with aiosqlite.connect(str(db)) as conn:
+        await _apply_schema_migrations(conn)
+        await conn.commit()
+
+    assert await _column_exists(str(db), "sessions", "current_question_id")

@@ -6,6 +6,7 @@ CREATE TABLE IF NOT EXISTS sessions (
     ended_at TEXT,
     status TEXT NOT NULL DEFAULT 'active',
     energy_score INTEGER,
+    current_question_id TEXT,
     notes TEXT,
     UNIQUE(interviewee_id, week)
 );
