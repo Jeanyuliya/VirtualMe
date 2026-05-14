@@ -20,6 +20,20 @@ CREATE TABLE IF NOT EXISTS turns (
     ts TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS redactions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    turn_id INTEGER NOT NULL REFERENCES turns(id) ON DELETE CASCADE,
+    category TEXT NOT NULL,
+    original TEXT NOT NULL,
+    replacement TEXT NOT NULL,
+    span_start INTEGER,
+    span_end INTEGER,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_redactions_turn
+    ON redactions(turn_id);
+
 CREATE TABLE IF NOT EXISTS anchors (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     interviewee_id TEXT NOT NULL,

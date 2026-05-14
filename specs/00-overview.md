@@ -108,3 +108,4 @@ Roughly **0.05%** the cost of a $4,000 course.
 - [`05-boundaries-and-pii.md`](05-boundaries-and-pii.md) — Privacy, PII handling, persona update protocol
 - [`06-three-plans.md`](06-three-plans.md) — Three commitment levels for running the pipeline
 - [`07-related-work.md`](07-related-work.md) — Academic anchors, architectural trade-offs, what VirtualMe does NOT claim
+- [`08-memory-architecture.md`](08-memory-architecture.md) — Four memory layers + self-learning + recommended `memory-hall` backend

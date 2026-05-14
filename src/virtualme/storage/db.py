@@ -4,9 +4,13 @@ import hashlib
 import json
 from enum import StrEnum
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import aiosqlite
 from pydantic import BaseModel
+
+if TYPE_CHECKING:
+    from virtualme.interview.pii import Redaction
 
 
 class Dimension(StrEnum):
@@ -124,6 +128,31 @@ class DB:
                 await conn.execute("SELECT * FROM turns WHERE content_hash = ?", (digest,))
             ).fetchone()
         return Turn(**dict(row))
+
+    async def save_redactions(self, turn_id: int, redactions: list[Redaction]) -> None:
+        if not redactions:
+            return
+        async with aiosqlite.connect(self.path) as conn:
+            await conn.executemany(
+                """
+                INSERT INTO redactions(
+                    turn_id, category, original, replacement, span_start, span_end
+                )
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                [
+                    (
+                        turn_id,
+                        redaction.category,
+                        redaction.original,
+                        redaction.replacement,
+                        redaction.span[0],
+                        redaction.span[1],
+                    )
+                    for redaction in redactions
+                ],
+            )
+            await conn.commit()
 
     async def save_anchor(
         self,
@@ -255,6 +284,45 @@ class DB:
             )
             rows = await cur.fetchall()
         return [Turn(**dict(row)) for row in reversed(rows)]
+
+    async def load_session_turns(self, session_id: int) -> list[Turn]:
+        async with aiosqlite.connect(self.path) as conn:
+            conn.row_factory = aiosqlite.Row
+            cur = await conn.execute(
+                "SELECT * FROM turns WHERE session_id = ? ORDER BY id",
+                (session_id,),
+            )
+            rows = await cur.fetchall()
+        return [Turn(**dict(row)) for row in rows]
+
+    async def mark_session_completed(self, session_id: int) -> None:
+        async with aiosqlite.connect(self.path) as conn:
+            await conn.execute(
+                """
+                UPDATE sessions
+                SET ended_at = CURRENT_TIMESTAMP, status = 'completed'
+                WHERE id = ?
+                """,
+                (session_id,),
+            )
+            await conn.commit()
+
+    async def load_stale_active_sessions(self, threshold_minutes: int = 30) -> list[Session]:
+        async with aiosqlite.connect(self.path) as conn:
+            conn.row_factory = aiosqlite.Row
+            cur = await conn.execute(
+                """
+                SELECT sessions.*
+                FROM sessions
+                JOIN turns ON turns.session_id = sessions.id
+                WHERE sessions.status = 'active'
+                GROUP BY sessions.id
+                HAVING MAX(turns.ts) <= datetime('now', ?)
+                """,
+                (f"-{threshold_minutes} minutes",),
+            )
+            rows = await cur.fetchall()
+        return [Session(**dict(row)) for row in rows]
 
     async def _fetch_anchors(self, interviewee_id: str, triangulated: bool | None = None):
         clause = "AND triangulated = ?" if triangulated is not None else ""

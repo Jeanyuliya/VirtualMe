@@ -1,12 +1,17 @@
+import logging
+
 from anthropic import AsyncAnthropic
 
 from virtualme.config import Settings
 from virtualme.interview.anchor_extractor import extract_anchors
 from virtualme.interview.depth_evaluator import evaluate_depth
 from virtualme.interview.follow_up import generate_follow_up, select_rule
-from virtualme.interview.pii import detect_pii
+from virtualme.interview.pii import scrub_pii
 from virtualme.interview.question_selector import QuestionSelector
+from virtualme.interview.session_lifecycle import finalize_session_if_closing
 from virtualme.storage.db import DB, Dimension, Layer, Question
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_QUESTION = Question(
     id="STATE-OPEN",
@@ -28,20 +33,23 @@ async def process_turn(
     settings = settings or Settings()
     session = await db.get_or_create_session(interviewee_id, week=1)
     turn_count = await db.count_turns(session.id)
-    user_turn = await db.save_turn(session.id, "user", incoming_message)
-    pii = detect_pii(incoming_message)
-    if pii:
-        reply = f"I noticed possible {', '.join(pii)}. Want to switch to a code name?"
-        await db.save_turn(session.id, "assistant", reply)
-        return reply
+    scrub_result = scrub_pii(incoming_message)
+    if scrub_result.redactions:
+        logger.info(
+            "PII redacted: %s items in turn from %s",
+            len(scrub_result.redactions),
+            interviewee_id,
+        )
+    user_turn = await db.save_turn(session.id, "user", scrub_result.scrubbed_text)
+    await db.save_redactions(user_turn.id, scrub_result.redactions)
 
     anchors_by_dimension = await db.load_anchors_summary(interviewee_id)
     current_question = _current_question(selector, session.week)
-    depth = await evaluate_depth(incoming_message, current_question.text, claude)
+    depth = await evaluate_depth(scrub_result.scrubbed_text, current_question.text, claude)
     all_anchors = [anchor for anchors in anchors_by_dimension.values() for anchor in anchors]
-    rule = select_rule(incoming_message, depth, all_anchors)
+    rule = select_rule(scrub_result.scrubbed_text, depth, all_anchors)
     if rule and depth != Layer.PRINCIPLE:
-        reply = await generate_follow_up(rule, incoming_message, current_question.text, claude)
+        reply = await generate_follow_up(rule, scrub_result.scrubbed_text, current_question.text, claude)
     else:
         extracted = await extract_anchors(user_turn, current_question, claude)
         for anchor in extracted:
@@ -52,7 +60,12 @@ async def process_turn(
                 anchor.content,
                 anchor.source_turn_ids,
             )
-        next_question = selector.select_next(session, incoming_message, anchors_by_dimension, energy=5)
+        next_question = selector.select_next(
+            session,
+            scrub_result.scrubbed_text,
+            anchors_by_dimension,
+            energy=5,
+        )
         if settings.use_ppa:
             from virtualme.interview.ppa import ppa_response
             from virtualme.interview.reinjection import build_reinjection_anchor, should_reinject
@@ -67,6 +80,19 @@ async def process_turn(
             reply = await _final_reply(interviewee_id, next_question or DEFAULT_QUESTION, claude, db)
 
     await db.save_turn(session.id, "assistant", reply)
+    if settings.use_ppa:
+        turns_so_far = await db.load_session_turns(session.id)
+        extracted = await finalize_session_if_closing(
+            session_id=session.id,
+            interviewee_id=interviewee_id,
+            user_text=incoming_message,
+            bot_reply=reply,
+            turns=turns_so_far,
+            claude=claude,
+            db=db,
+        )
+        if extracted:
+            logger.info("Session %s closed: extracted %s triples", session.id, extracted)
     return reply
 
 
