@@ -20,6 +20,11 @@ Most "build your AI clone" courses charge $3,000–$5,000 USD. Reading their syl
 
 **The technical part doesn't need a $4,000 course.** VirtualMe is the open-source version of those three things.
 
+Two more things worth saying:
+
+- This is not another black-box product that will one day silently update and make you feel "my AI became someone else." SOUL / VOICE / BOUNDARIES are your own markdown files. Every change is visible and revertible.
+- Your interview conversations **never leave your machine**. No backend, no human moderators reviewing transcripts, no cloud sync. `hard delete` actually means hard delete.
+
 ## The core flip: don't fill forms — get interviewed
 
 Form-filled persona files are **performative**. Most people describe who they *want to be*, not who they *are*. The result is an AI agent that sounds like a LinkedIn bio.

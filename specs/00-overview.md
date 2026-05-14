@@ -107,3 +107,4 @@ Roughly **0.05%** the cost of a $4,000 course.
 - [`04-tech-stack.md`](04-tech-stack.md) — FastAPI + SQLite + Claude Opus implementation
 - [`05-boundaries-and-pii.md`](05-boundaries-and-pii.md) — Privacy, PII handling, persona update protocol
 - [`06-three-plans.md`](06-three-plans.md) — Three commitment levels for running the pipeline
+- [`07-related-work.md`](07-related-work.md) — Academic anchors, architectural trade-offs, what VirtualMe does NOT claim

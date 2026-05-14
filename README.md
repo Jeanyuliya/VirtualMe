@@ -20,6 +20,11 @@
 
 **技術上，這三件事不需要 $4,000。** VirtualMe 是這三件事的 open-source 版本。
 
+順帶兩件事：
+
+- 這不是另一個會在某天 silently update 之後讓你覺得「我的 AI 變成另一個人了」的黑盒子產品——SOUL / VOICE / BOUNDARIES 是你自己的 markdown 檔，每次修改你都看得到、改得回。
+- 你的訪談對話**不出你的機器**。沒有後台、沒有人類 moderator review、沒有 cloud sync。`hard delete` 是真的 hard。
+
 ## 核心翻轉：不填表，被訪談
 
 填問卷產出的人格檔案是**表演式**的——大多數人寫的是「我想成為的樣子」而不是「我實際是誰」，結果產出的 AI 代理人講話像 LinkedIn 簡介。
