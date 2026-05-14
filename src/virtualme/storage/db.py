@@ -431,6 +431,38 @@ class DB:
             )
             await conn.commit()
 
+    async def save_blind_test(
+        self,
+        interviewee_id: str,
+        week: int,
+        correctness_per_item: dict[str, bool],
+        overall_accuracy: float,
+        verdict: Verdict,
+        weakest_dimension: str | None = None,
+        recommended_action: str | None = None,
+    ) -> int:
+        async with self._connect() as conn:
+            cur = await conn.execute(
+                """
+                INSERT INTO blind_tests(
+                    interviewee_id, week, correctness_per_item, overall_accuracy,
+                    verdict, weakest_dimension, recommended_action
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    interviewee_id,
+                    week,
+                    json.dumps(correctness_per_item),
+                    overall_accuracy,
+                    verdict,
+                    weakest_dimension,
+                    recommended_action,
+                ),
+            )
+            await conn.commit()
+        return int(cur.lastrowid)
+
     async def load_triples(self, interviewee_id: str):
         from virtualme.interview.triples import PersonaTriple
 
