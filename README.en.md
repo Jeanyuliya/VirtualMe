@@ -100,6 +100,25 @@ Plus a working agent endpoint that can:
 - ❌ Not autonomous. Every outgoing message is `draft → human review → ship`.
 - ❌ Not a course. No cohort, no coach, no certificate. Read the spec, fork the repo, run it.
 
+## Memory + self-learning (pairs with memory-hall)
+
+VirtualMe's memory has 4 layers (full detail in [`specs/08-memory-architecture.md`](specs/08-memory-architecture.md)):
+
+| Layer | Content | Default backend | Self-reflection? |
+|---|---|---|---|
+| L1 Episodic | Conversation itself | SQLite | — |
+| L2 Semantic | Extracted triples / anchors | SQLite | — |
+| L3 Reflective | Contradiction / drift detection | memory-hall ✨ | ✅ |
+| L4 Corrective | Agent feedback learning | memory-hall ✨ | ✅ |
+
+VirtualMe ships with SQLite (zero-dep, local-first). For the full 8-week pipeline **with self-learning and self-reflection**, pair with another Apache 2.0 OSS project:
+
+→ **[memory-hall](https://github.com/MakiDevelop/memory-hall)** — The AI agent memory engine that deliberately stays small. SQLite + sqlite-vec + Ollama, CJK-native.
+
+memhall provides hybrid search, provenance / upstream tracking, HMAC auth, CJK tokenization — things you can build on top of SQLite but shouldn't have to. The two projects are naturally complementary: VirtualMe **extracts** the person → memhall **stores + reflects + learns across sessions**.
+
+Integration plan tracked in issues [#5](https://github.com/MakiDevelop/VirtualMe/issues/5) and [#10](https://github.com/MakiDevelop/VirtualMe/issues/10) for v0.5.
+
 ## Honest limitations
 
 - Prompt-layer personas have structural ceilings on long-conversation consistency and adversarial robustness

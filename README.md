@@ -100,6 +100,25 @@ VirtualMe 把這個發現延伸成可上線的 pipeline：
 - ❌ 不是自動代理人。每一則 outgoing 訊息都是 `draft → 人類 review → ship`。
 - ❌ 不是課程。沒有教練、沒有同儕、沒有結業證書。讀 spec、fork repo、自己跑。
 
+## Memory + 自我學習（搭配 memory-hall）
+
+VirtualMe 的 memory 分 4 層（詳見 [`specs/08-memory-architecture.md`](specs/08-memory-architecture.md)）：
+
+| 層 | 內容 | 預設 backend | 自我反省能力 |
+|---|---|---|---|
+| L1 Episodic | 對話本身 | SQLite | — |
+| L2 Semantic | 萃取的 triples / anchors | SQLite | — |
+| L3 Reflective | 矛盾偵測 / drift detection | memory-hall ✨ | ✅ |
+| L4 Corrective | agent feedback 學習 | memory-hall ✨ | ✅ |
+
+VirtualMe 預設用 SQLite（零依賴、本地），但**真要跑 8 週深度 pipeline + 自我學習 + 自我反省**，建議搭配另一個 Apache 2.0 OSS 專案：
+
+→ **[memory-hall](https://github.com/MakiDevelop/memory-hall)** — The AI agent memory engine that deliberately stays small. SQLite + sqlite-vec + Ollama, CJK-native.
+
+memhall 內建 hybrid search、provenance / upstream tracking、HMAC auth、CJK 分詞——這些是 SQLite 路徑做得到但要重造輪子的東西。兩個專案是天然互補：VirtualMe **萃取**人 → memhall **存取 + 反省 + 跨 session 學習**。
+
+詳細整合計畫見 v0.5 issue [#5](https://github.com/MakiDevelop/VirtualMe/issues/5) 與 [#10](https://github.com/MakiDevelop/VirtualMe/issues/10)。
+
 ## 誠實告知的限制
 
 - Prompt-layer persona 在**長對話一致性**和**對抗性輸入**上有結構性上限
