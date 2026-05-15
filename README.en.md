@@ -87,6 +87,8 @@ Eight persona markdown files (your archive; exports also include `START_HERE.md`
 | `BOUNDARIES.md` | Refusal list + PII rules + persona update protocol |
 | `STATE.md` | Current state (monthly update) |
 
+Export scrubs PII from anchor content again at the output boundary. It does not rename `interviewee_id`, folder names, or archive metadata, so avoid using an email address or legal name as the interviewee id.
+
 Plus a working agent endpoint that can:
 - Draft messages to clients / counterparties / peers
 - Reply to public posts in your voice

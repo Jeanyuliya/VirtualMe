@@ -87,6 +87,8 @@ VirtualMe 把這個發現延伸成可上線的 pipeline：
 | `BOUNDARIES.md` | 拒答清單 + PII 規則 + persona update protocol |
 | `STATE.md` | 近況（月更） |
 
+匯出時會再次 scrub anchor 內容中的 PII；`interviewee_id`、資料夾名與 archive metadata 不會被改名，請不要用 email / 真名當 interviewee id。
+
 加上一個可用的 agent endpoint，可以：
 - 起草給客戶 / 候選人 / 同事的訊息
 - 用你的語氣回覆公開貼文
