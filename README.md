@@ -74,7 +74,7 @@ VirtualMe 把這個發現延伸成可上線的 pipeline：
 
 ## 8 週後你會拿到什麼
 
-8 個 markdown 檔案（你的 archive）：
+8 個 persona markdown 檔案（你的 archive；匯出時另含 `index.md` 作為索引）：
 
 | 檔案 | 內容 |
 |---|---|
@@ -162,7 +162,7 @@ python -m virtualme.cli --interviewee yourself
 訪談累積資料後，可以先輸出 markdown archive，再準備一次手動 blind test：
 
 ```bash
-# 匯出目前 anchors / triangulated principles
+# 匯出目前 persona markdown archive
 python -m virtualme.export \
   --db sqlite:///./data/virtualme.db \
   --interviewee yourself \

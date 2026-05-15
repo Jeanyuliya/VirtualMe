@@ -5,35 +5,50 @@ from virtualme.export.__main__ import main
 from virtualme.export.markdown import export_markdown
 from virtualme.storage.db import DB, Dimension, Layer
 
+PERSONA_FILES = {
+    "index.md",
+    "SOUL.md",
+    "VOICE.md",
+    "SKILL.md",
+    "PEOPLE.md",
+    "HISTORY.md",
+    "JOURNAL.md",
+    "BOUNDARIES.md",
+    "STATE.md",
+}
 
-async def test_export_creates_three_files(tmp_path):
+
+async def test_export_creates_persona_archive_files(tmp_path):
     db = DB(str(tmp_path / "virtualme.db"))
     await db.init()
     await db.save_anchor("u1", Dimension.SOUL, Layer.PRINCIPLE, "directness", [1], ["Q1"])
 
     paths = await export_markdown(db, "u1", tmp_path / "exports")
 
-    assert {path.name for path in paths} == {"index.md", "anchors.md", "principles.md"}
+    assert {path.name for path in paths} == PERSONA_FILES
     for path in paths:
         assert path.exists()
 
 
-async def test_anchors_are_grouped_by_dimension(tmp_path):
+async def test_dimension_files_only_include_matching_anchors(tmp_path):
     db = DB(str(tmp_path / "virtualme.db"))
     await db.init()
     await db.save_anchor("u1", Dimension.SOUL, Layer.PRINCIPLE, "directness", [1], ["Q1"])
     await db.save_anchor("u1", Dimension.SKILL, Layer.FACT, "debugging", [2], ["Q2"])
 
     await export_markdown(db, "u1", tmp_path / "exports")
-    text = (tmp_path / "exports" / "u1" / "anchors.md").read_text(encoding="utf-8")
+    soul_text = (tmp_path / "exports" / "u1" / "SOUL.md").read_text(encoding="utf-8")
+    skill_text = (tmp_path / "exports" / "u1" / "SKILL.md").read_text(encoding="utf-8")
 
-    assert "## SOUL" in text
-    assert "## SKILL" in text
-    assert "directness" in text
-    assert "debugging" in text
+    assert "# SOUL" in soul_text
+    assert "directness" in soul_text
+    assert "debugging" not in soul_text
+    assert "# SKILL" in skill_text
+    assert "debugging" in skill_text
+    assert "directness" not in skill_text
 
 
-async def test_principles_only_include_triangulated_anchors(tmp_path):
+async def test_dimension_files_separate_triangulated_and_emerging_anchors(tmp_path):
     db = DB(str(tmp_path / "virtualme.db"))
     await db.init()
     await db.save_anchor("u1", Dimension.SOUL, Layer.PRINCIPLE, "draft value", [1], ["Q1"])
@@ -47,10 +62,12 @@ async def test_principles_only_include_triangulated_anchors(tmp_path):
     )
 
     await export_markdown(db, "u1", tmp_path / "exports")
-    text = (tmp_path / "exports" / "u1" / "principles.md").read_text(encoding="utf-8")
+    text = (tmp_path / "exports" / "u1" / "SOUL.md").read_text(encoding="utf-8")
 
+    assert "## Triangulated Principles" in text
+    assert "## Emerging Anchors" in text
     assert "confirmed value" in text
-    assert "draft value" not in text
+    assert "draft value" in text
 
 
 async def test_export_rescrubs_pii_at_output_boundary(tmp_path):
@@ -70,7 +87,7 @@ async def test_export_rescrubs_pii_at_output_boundary(tmp_path):
         await conn.commit()
 
     await export_markdown(db, "u1", tmp_path / "exports")
-    text = (tmp_path / "exports" / "u1" / "anchors.md").read_text(encoding="utf-8")
+    text = (tmp_path / "exports" / "u1" / "SOUL.md").read_text(encoding="utf-8")
 
     assert "[EMAIL]" in text
     assert "john.doe@example.com" not in text

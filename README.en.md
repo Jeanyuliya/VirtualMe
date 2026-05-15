@@ -74,7 +74,7 @@ VirtualMe extends this into a production pipeline:
 
 ## What you get after 8 weeks
 
-Eight markdown files (your archive):
+Eight persona markdown files (your archive; exports also include `index.md` as a table of contents):
 
 | File | Contains |
 |---|---|
