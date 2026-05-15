@@ -74,7 +74,7 @@ VirtualMe 把這個發現延伸成可上線的 pipeline：
 
 ## 8 週後你會拿到什麼
 
-8 個 persona markdown 檔案（你的 archive；匯出時另含 `index.md` 作為索引）：
+8 個 persona markdown 檔案（你的 archive；匯出時另含 `START_HERE.md`、`index.md`、`manifest.json` 作為入口、索引與機器可讀 metadata）：
 
 | 檔案 | 內容 |
 |---|---|

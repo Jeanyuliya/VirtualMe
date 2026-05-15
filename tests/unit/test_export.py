@@ -1,3 +1,6 @@
+import hashlib
+import json
+
 import aiosqlite
 from pydantic import ValidationError
 
@@ -5,8 +8,10 @@ from virtualme.export.__main__ import main
 from virtualme.export.markdown import export_markdown
 from virtualme.storage.db import DB, Dimension, Layer
 
-PERSONA_FILES = {
+ARCHIVE_FILES = {
+    "START_HERE.md",
     "index.md",
+    "manifest.json",
     "SOUL.md",
     "VOICE.md",
     "SKILL.md",
@@ -25,7 +30,7 @@ async def test_export_creates_persona_archive_files(tmp_path):
 
     paths = await export_markdown(db, "u1", tmp_path / "exports")
 
-    assert {path.name for path in paths} == PERSONA_FILES
+    assert {path.name for path in paths} == ARCHIVE_FILES
     for path in paths:
         assert path.exists()
 
@@ -41,14 +46,16 @@ async def test_dimension_files_only_include_matching_anchors(tmp_path):
     skill_text = (tmp_path / "exports" / "u1" / "SKILL.md").read_text(encoding="utf-8")
 
     assert "# SOUL" in soul_text
+    assert "dimension: SOUL" in soul_text
     assert "directness" in soul_text
     assert "debugging" not in soul_text
     assert "# SKILL" in skill_text
+    assert "dimension: SKILL" in skill_text
     assert "debugging" in skill_text
     assert "directness" not in skill_text
 
 
-async def test_dimension_files_separate_triangulated_and_emerging_anchors(tmp_path):
+async def test_dimension_files_separate_core_truths_and_emerging_patterns(tmp_path):
     db = DB(str(tmp_path / "virtualme.db"))
     await db.init()
     await db.save_anchor("u1", Dimension.SOUL, Layer.PRINCIPLE, "draft value", [1], ["Q1"])
@@ -64,10 +71,50 @@ async def test_dimension_files_separate_triangulated_and_emerging_anchors(tmp_pa
     await export_markdown(db, "u1", tmp_path / "exports")
     text = (tmp_path / "exports" / "u1" / "SOUL.md").read_text(encoding="utf-8")
 
-    assert "## Triangulated Principles" in text
-    assert "## Emerging Anchors" in text
+    assert "## Core Truths" in text
+    assert "## Emerging Patterns" in text
     assert "confirmed value" in text
     assert "draft value" in text
+
+
+async def test_provenance_is_collapsed_under_anchor_items(tmp_path):
+    db = DB(str(tmp_path / "virtualme.db"))
+    await db.init()
+    await db.save_anchor(
+        "u1",
+        Dimension.SOUL,
+        Layer.PRINCIPLE,
+        "confirmed value",
+        [2, 3, 4],
+        ["Q1", "Q2", "Q3"],
+    )
+
+    await export_markdown(db, "u1", tmp_path / "exports")
+    text = (tmp_path / "exports" / "u1" / "SOUL.md").read_text(encoding="utf-8")
+
+    assert "- confirmed value" in text
+    assert "<details>" in text
+    assert "<summary>Provenance</summary>" in text
+    assert "- Questions: Q1, Q2, Q3" in text
+    assert "- Turns: 2, 3, 4" in text
+
+
+async def test_export_writes_manifest_with_file_hashes(tmp_path):
+    db = DB(str(tmp_path / "virtualme.db"))
+    await db.init()
+    await db.save_anchor("u1", Dimension.SOUL, Layer.PRINCIPLE, "directness", [1], ["Q1"])
+
+    await export_markdown(db, "u1", tmp_path / "exports")
+    target = tmp_path / "exports" / "u1"
+    manifest = json.loads((target / "manifest.json").read_text(encoding="utf-8"))
+    soul_text = (target / "SOUL.md").read_text(encoding="utf-8")
+    soul_hash = hashlib.sha256(soul_text.encode("utf-8")).hexdigest()
+
+    assert manifest["schema_version"] == "0.5"
+    assert manifest["human_entrypoint"] == "START_HERE.md"
+    assert manifest["technical_index"] == "index.md"
+    assert manifest["dimensions"]["SOUL"]["anchor_count"] == 1
+    assert manifest["files"]["SOUL.md"]["sha256"] == f"sha256:{soul_hash}"
 
 
 async def test_export_rescrubs_pii_at_output_boundary(tmp_path):
