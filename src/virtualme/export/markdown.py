@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import html
 import json
 from datetime import UTC, datetime
 from pathlib import Path
@@ -94,9 +95,10 @@ def _render_start_here(
             "",
             "## Machine-Readable Metadata",
             "",
-            "- [manifest.json](manifest.json) contains schema version, counts, and file hashes.",
+            "- [manifest.json](manifest.json) contains schema version, counts, and payload file hashes.",
             "- Markdown frontmatter contains per-file dimension metadata.",
             "- Provenance details are folded under each item so the main text stays readable.",
+            "- PII scrubbing applies to exported anchor content; archive IDs and folder names are unchanged.",
         ]
     )
     return "\n".join(lines) + "\n"
@@ -141,7 +143,7 @@ def _render_dimension_file(dimension: Dimension, anchors: list[Anchor], exported
         f"anchor_count: {len(anchors)}",
         f"triangulated_count: {len(triangulated)}",
         f"emerging_count: {len(emerging)}",
-        "pii_scrubbed: true",
+        "anchor_content_pii_scrubbed: true",
         "---",
         "",
         f"# {dimension.value}",
@@ -175,7 +177,9 @@ def _anchor_block(anchor: Anchor) -> list[str]:
     turn_ids = ", ".join(str(turn_id) for turn_id in anchor.source_turn_ids) or "unknown"
     status = "triangulated" if anchor.triangulated else "emerging"
     return [
-        f"- {content}",
+        "-",
+        "",
+        *_blockquote_lines(content),
         "",
         "  <details>",
         "  <summary>Provenance</summary>",
@@ -188,6 +192,11 @@ def _anchor_block(anchor: Anchor) -> list[str]:
         "  </details>",
         "",
     ]
+
+
+def _blockquote_lines(content: str) -> list[str]:
+    escaped = html.escape(content, quote=False)
+    return [f"  > {line}" if line else "  >" for line in escaped.splitlines()]
 
 
 def _render_manifest(
@@ -214,11 +223,12 @@ def _render_manifest(
         "interviewee_id": interviewee_id,
         "exported_at": exported_at,
         "persona_files": [f"{dimension.value}.md" for dimension in Dimension],
+        "archive_files": sorted([*files, "manifest.json"]),
         "human_entrypoint": "START_HERE.md",
         "technical_index": "index.md",
-        "pii_scrub_level": "standard",
+        "pii_scrub_scope": "anchor_content",
         "dimensions": dimensions,
-        "files": {
+        "payload_files": {
             name: {
                 "sha256": f"sha256:{_sha256(content)}",
                 "bytes": len(content.encode("utf-8")),

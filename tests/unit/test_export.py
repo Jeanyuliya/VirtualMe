@@ -92,11 +92,33 @@ async def test_provenance_is_collapsed_under_anchor_items(tmp_path):
     await export_markdown(db, "u1", tmp_path / "exports")
     text = (tmp_path / "exports" / "u1" / "SOUL.md").read_text(encoding="utf-8")
 
-    assert "- confirmed value" in text
+    assert "  > confirmed value" in text
     assert "<details>" in text
     assert "<summary>Provenance</summary>" in text
     assert "- Questions: Q1, Q2, Q3" in text
     assert "- Turns: 2, 3, 4" in text
+
+
+async def test_anchor_markdown_cannot_break_export_structure(tmp_path):
+    db = DB(str(tmp_path / "virtualme.db"))
+    await db.init()
+    await db.save_anchor(
+        "u1",
+        Dimension.SOUL,
+        Layer.PRINCIPLE,
+        "first line\n## Injected\n</details>\n<script>alert(1)</script>",
+        [1],
+        ["Q1"],
+    )
+
+    await export_markdown(db, "u1", tmp_path / "exports")
+    text = (tmp_path / "exports" / "u1" / "SOUL.md").read_text(encoding="utf-8")
+
+    assert "\n## Injected" not in text
+    assert "</details>\n<script>" not in text
+    assert "  > ## Injected" in text
+    assert "  > &lt;/details&gt;" in text
+    assert "  > &lt;script&gt;alert(1)&lt;/script&gt;" in text
 
 
 async def test_export_writes_manifest_with_file_hashes(tmp_path):
@@ -113,8 +135,10 @@ async def test_export_writes_manifest_with_file_hashes(tmp_path):
     assert manifest["schema_version"] == "0.5"
     assert manifest["human_entrypoint"] == "START_HERE.md"
     assert manifest["technical_index"] == "index.md"
+    assert set(manifest["archive_files"]) == ARCHIVE_FILES
     assert manifest["dimensions"]["SOUL"]["anchor_count"] == 1
-    assert manifest["files"]["SOUL.md"]["sha256"] == f"sha256:{soul_hash}"
+    assert "manifest.json" not in manifest["payload_files"]
+    assert manifest["payload_files"]["SOUL.md"]["sha256"] == f"sha256:{soul_hash}"
 
 
 async def test_export_rescrubs_pii_at_output_boundary(tmp_path):
@@ -138,6 +162,7 @@ async def test_export_rescrubs_pii_at_output_boundary(tmp_path):
 
     assert "[EMAIL]" in text
     assert "john.doe@example.com" not in text
+    assert "anchor_content_pii_scrubbed: true" in text
 
 
 async def test_export_cli_with_explicit_db_does_not_require_api_key(tmp_path, monkeypatch):
