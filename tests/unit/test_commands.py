@@ -8,7 +8,7 @@ from virtualme.config import Settings
 from virtualme.interview.bot import process_turn
 from virtualme.interview.commands import RetalkRequest, StatusQuery, detect_command
 from virtualme.interview.question_selector import QuestionSelector
-from virtualme.storage.db import DB, Dimension, Question
+from virtualme.storage.db import DB, Dimension, Layer, Question
 
 # --- detect_command pure tests -----------------------------------------------
 
@@ -81,6 +81,7 @@ async def test_process_turn_retalk_pins_dimension_question(tmp_path):
 
     assert "語氣" in reply
     assert "Voice question here" in reply
+    assert "封存" in reply
     assert await db.get_current_question_id(1) == "QV"
 
 
@@ -137,3 +138,25 @@ async def test_retalk_then_normal_answer_runs_without_error(tmp_path):
     assert retalk_reply and reply
     turns = await db.load_session_turns(1)
     assert len(turns) >= 4  # retalk pair + normal answer pair
+
+
+async def test_retalk_archives_dimension_anchors_and_resets_question_state(tmp_path):
+    db = await _new_db(tmp_path)
+    selector = QuestionSelector(
+        {
+            1: [Question(id="Q1", week=1, dimension=Dimension.STATE, text="State question")],
+            2: [Question(id="QV", week=2, dimension=Dimension.VOICE, text="Voice question here")],
+        }
+    )
+    settings = Settings(anthropic_api_key=SecretStr("k"))
+    await db.save_anchor("u1", Dimension.VOICE, Layer.PRINCIPLE, "old voice", [1], ["QV"])
+    await db.save_anchor("u1", Dimension.SOUL, Layer.PRINCIPLE, "old value", [2], ["Q1"])
+    await db.record_question_answered("u1", "QV", 2, "principle")
+
+    reply = await process_turn("u1", "重談 語氣", object(), db, selector, settings)
+
+    assert "封存" in reply
+    summary = await db.load_anchors_summary("u1")
+    assert summary[Dimension.VOICE] == []
+    assert len(summary[Dimension.SOUL]) == 1
+    assert await db.load_asked_question_ids("u1") == {"QV"}

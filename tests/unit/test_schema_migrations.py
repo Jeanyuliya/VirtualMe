@@ -135,6 +135,19 @@ async def test_migrated_column_default(tmp_path):
     assert row[0] == "[]"
 
 
+async def test_migration_adds_anchor_archive_columns(tmp_path):
+    db = tmp_path / "archive-columns.db"
+    await _create_v042_anchors(str(db))
+
+    async with aiosqlite.connect(str(db)) as conn:
+        await _apply_schema_migrations(conn)
+        await conn.commit()
+
+    assert await _column_exists(str(db), "anchors", "active")
+    assert await _column_exists(str(db), "anchors", "archived_at")
+    assert await _column_exists(str(db), "anchors", "archive_reason")
+
+
 async def test_migration_handles_duplicate_column_race(tmp_path):
     """Simulate race: column already added externally between PRAGMA and ALTER."""
     db = tmp_path / "race.db"

@@ -43,6 +43,9 @@ CREATE TABLE IF NOT EXISTS anchors (
     triangulated INTEGER NOT NULL DEFAULT 0,
     source_question_ids TEXT NOT NULL DEFAULT '[]',
     source_turn_ids TEXT NOT NULL DEFAULT '[]',
+    active INTEGER NOT NULL DEFAULT 1,
+    archived_at TEXT,
+    archive_reason TEXT,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     pii_tag TEXT
 );

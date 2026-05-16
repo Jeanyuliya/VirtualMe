@@ -402,15 +402,30 @@ async def _handle_retalk(
 ) -> str:
     if command.dimension is None:
         return format_retalk_needs_dimension()
+    question_ids = [
+        question.id for question in _all_questions(selector) if question.dimension == command.dimension
+    ]
+    archived_count = await db.restart_dimension(
+        interviewee_id,
+        command.dimension,
+        question_ids,
+    )
     question = _first_question_for_dimension(selector, command.dimension)
     if question is None:
         # No pooled question for that dimension — acknowledge with an open ask.
         label = DIMENSION_LABELS[command.dimension]
-        return format_retalk_reply(command.dimension, f"請再多談談關於「{label}」的部分。")
+        return format_retalk_reply(
+            command.dimension,
+            f"我已先封存這一塊既有的 {archived_count} 條記憶。"
+            f"請重新從零談談關於「{label}」的部分。",
+        )
     # Pin the dimension's question so the next answer is attributed to it.
     await db.set_current_question_id(session.id, question.id)
     await db.record_question_asked(interviewee_id, question.id, session.week)
-    return format_retalk_reply(command.dimension, question.text)
+    return format_retalk_reply(
+        command.dimension,
+        f"我已先封存這一塊既有的 {archived_count} 條記憶, 接下來從零重談。\n{question.text}",
+    )
 
 
 def _first_question_for_dimension(

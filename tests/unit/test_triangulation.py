@@ -180,3 +180,48 @@ async def test_non_principle_anchors_are_not_merged(tmp_path):
     assert first.id != second.id
     summary = await db.load_anchors_summary("u1")
     assert len(summary[Dimension.HISTORY]) == 2
+
+
+async def test_restart_dimension_archives_existing_anchors_without_deleting(tmp_path):
+    db = DB(str(tmp_path / "virtualme.db"))
+    await db.init()
+
+    old_anchor = await db.save_anchor(
+        "u1",
+        Dimension.VOICE,
+        Layer.PRINCIPLE,
+        "old direct voice",
+        [1],
+        ["V1"],
+    )
+    await db.save_anchor(
+        "u1",
+        Dimension.SOUL,
+        Layer.PRINCIPLE,
+        "stable value",
+        [2],
+        ["S1"],
+    )
+
+    archived = await db.restart_dimension("u1", Dimension.VOICE, ["V1"])
+
+    assert archived == 1
+    summary = await db.load_anchors_summary("u1")
+    assert summary[Dimension.VOICE] == []
+    assert len(summary[Dimension.SOUL]) == 1
+
+    async with db._connect() as conn:
+        row = await (
+            await conn.execute(
+                """
+                SELECT active, archived_at, archive_reason
+                FROM anchors
+                WHERE id = ?
+                """,
+                (old_anchor.id,),
+            )
+        ).fetchone()
+
+    assert row[0] == 0
+    assert row[1] is not None
+    assert row[2] == "dimension_restart"

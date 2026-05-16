@@ -217,6 +217,18 @@ async def _apply_schema_migrations(conn: aiosqlite.Connection) -> None:
             "ALTER TABLE anchors "
             "ADD COLUMN source_question_ids TEXT NOT NULL DEFAULT '[]'",
         ),
+        (
+            "active",
+            "ALTER TABLE anchors ADD COLUMN active INTEGER NOT NULL DEFAULT 1",
+        ),
+        (
+            "archived_at",
+            "ALTER TABLE anchors ADD COLUMN archived_at TEXT",
+        ),
+        (
+            "archive_reason",
+            "ALTER TABLE anchors ADD COLUMN archive_reason TEXT",
+        ),
         # v0.5+ anchor migrations append here
     ]
 
@@ -508,6 +520,46 @@ class DB:
                 (question_id, session_id),
             )
             await conn.commit()
+
+    async def restart_dimension(
+        self,
+        interviewee_id: str,
+        dimension: Dimension,
+        question_ids: list[str],
+        *,
+        reason: str = "dimension_restart",
+    ) -> int:
+        """Archive a dimension's active anchors and reset its question progress.
+
+        This is intentionally a soft archive: old anchors remain in SQLite with
+        provenance, but active persona context and exports start fresh for the
+        selected dimension.
+        """
+        async with self._connect() as conn:
+            cur = await conn.execute(
+                """
+                UPDATE anchors
+                SET active = 0,
+                    archived_at = CURRENT_TIMESTAMP,
+                    archive_reason = ?
+                WHERE interviewee_id = ?
+                  AND dimension = ?
+                  AND active = 1
+                """,
+                (reason, interviewee_id, dimension.value),
+            )
+            if question_ids:
+                placeholders = ", ".join("?" for _ in question_ids)
+                await conn.execute(
+                    f"""
+                    DELETE FROM question_state
+                    WHERE interviewee_id = ?
+                      AND question_id IN ({placeholders})
+                    """,
+                    [interviewee_id, *question_ids],
+                )
+            await conn.commit()
+        return cur.rowcount
 
     async def claim_transport_event(
         self,
@@ -821,6 +873,7 @@ class DB:
             WHERE interviewee_id = ?
               AND dimension = ?
               AND layer = ?
+              AND active = 1
             ORDER BY created_at
             """,
             (interviewee_id, dimension, Layer.PRINCIPLE),
@@ -1046,8 +1099,15 @@ class DB:
             rows = await cur.fetchall()
         return [Session(**dict(row)) for row in rows]
 
-    async def _fetch_anchors(self, interviewee_id: str, triangulated: bool | None = None):
+    async def _fetch_anchors(
+        self,
+        interviewee_id: str,
+        triangulated: bool | None = None,
+        *,
+        active_only: bool = True,
+    ):
         clause = "AND triangulated = ?" if triangulated is not None else ""
+        active_clause = "AND active = 1" if active_only else ""
         params = (
             (interviewee_id, int(triangulated))
             if triangulated is not None
@@ -1056,7 +1116,9 @@ class DB:
         async with self._connect() as conn:
             conn.row_factory = aiosqlite.Row
             cur = await conn.execute(
-                f"SELECT * FROM anchors WHERE interviewee_id = ? {clause} ORDER BY created_at",
+                "SELECT * FROM anchors "
+                f"WHERE interviewee_id = ? {clause} {active_clause} "
+                "ORDER BY created_at",
                 params,
             )
             return await cur.fetchall()
