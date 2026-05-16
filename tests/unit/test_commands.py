@@ -6,7 +6,7 @@ from pydantic import SecretStr
 
 from virtualme.config import Settings
 from virtualme.interview.bot import process_turn
-from virtualme.interview.commands import RetalkRequest, StatusQuery, detect_command
+from virtualme.interview.commands import RestartRequest, RetalkRequest, StatusQuery, detect_command
 from virtualme.interview.question_selector import QuestionSelector
 from virtualme.storage.db import DB, Dimension, Layer, Question
 
@@ -19,6 +19,11 @@ def test_detect_status_query():
     assert isinstance(detect_command("萃取進度"), StatusQuery)
     assert isinstance(detect_command("有哪些主題"), StatusQuery)
     assert isinstance(detect_command("which dimension are we on"), StatusQuery)
+
+
+def test_detect_restart_request():
+    assert isinstance(detect_command("重頭開始萃取"), RestartRequest)
+    assert isinstance(detect_command("從頭開始"), RestartRequest)
 
 
 def test_detect_retalk_with_dimension():
@@ -96,6 +101,63 @@ async def test_process_turn_status_query_reports_completion_progress(tmp_path):
     assert "語氣・表達: 33%" in reply
     assert "界線・原則: 100%" in reply
     assert "目前最缺" in reply
+
+
+async def test_process_turn_restart_archives_old_run_and_starts_week_one(tmp_path):
+    db = await _new_db(tmp_path)
+    selector = QuestionSelector(
+        {
+            1: [
+                Question(
+                    id="Q1",
+                    week=1,
+                    dimension=Dimension.STATE,
+                    text="How has work been?",
+                )
+            ]
+        }
+    )
+    settings = Settings(
+        anthropic_api_key=SecretStr("k"),
+        persona_export_dir=str(tmp_path / "personas"),
+    )
+    old_session = await db.get_or_create_session("u1", week=1)
+    await db.save_turn(old_session.id, "assistant", "old question")
+    await db.save_anchor("u1", Dimension.VOICE, Layer.PRINCIPLE, "old voice", [1], ["Q1"])
+    await db.save_triple(
+        {
+            "interviewee_id": "u1",
+            "subject": "interviewee",
+            "relation": "preference",
+            "object": "old memory",
+            "source_turn_ids": [1],
+            "confidence": 0.9,
+        }
+    )
+
+    reply = await process_turn("u1", "重頭開始萃取", object(), db, selector, settings)
+
+    assert "從頭開始萃取" in reply
+    assert "舊資料已封存" in reply
+    assert "How has work been?" in reply
+    assert await db.load_anchors_summary("u1") == {dimension: [] for dimension in Dimension}
+    assert await db.load_triples("u1") == []
+    assert (tmp_path / "personas" / "u1" / "VOICE.md").is_file()
+
+    async with db._connect() as conn:
+        sessions = await (
+            await conn.execute(
+                "SELECT id, week, status, current_question_id FROM sessions "
+                "WHERE interviewee_id = ? ORDER BY id",
+                ("u1",),
+            )
+        ).fetchall()
+
+    assert sessions[0][1] == -old_session.id
+    assert sessions[0][2] == "archived"
+    assert sessions[-1][1] == 1
+    assert sessions[-1][2] == "active"
+    assert sessions[-1][3] == "Q1"
 
 
 async def test_process_turn_retalk_pins_dimension_question(tmp_path):

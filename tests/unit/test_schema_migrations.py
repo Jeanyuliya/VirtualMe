@@ -148,6 +148,31 @@ async def test_migration_adds_anchor_archive_columns(tmp_path):
     assert await _column_exists(str(db), "anchors", "archive_reason")
 
 
+async def test_migration_adds_triple_archive_columns(tmp_path):
+    db = tmp_path / "triple-archive-columns.db"
+    async with aiosqlite.connect(str(db)) as conn:
+        await conn.execute("""
+            CREATE TABLE persona_triples (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                interviewee_id TEXT NOT NULL,
+                subject TEXT NOT NULL,
+                relation TEXT NOT NULL,
+                object TEXT NOT NULL,
+                source_turn_ids TEXT NOT NULL,
+                confidence REAL DEFAULT 1.0,
+                embedding BLOB,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        await conn.commit()
+        await _apply_schema_migrations(conn)
+        await conn.commit()
+
+    assert await _column_exists(str(db), "persona_triples", "active")
+    assert await _column_exists(str(db), "persona_triples", "archived_at")
+    assert await _column_exists(str(db), "persona_triples", "archive_reason")
+
+
 async def test_migration_handles_duplicate_column_race(tmp_path):
     """Simulate race: column already added externally between PRAGMA and ALTER."""
     db = tmp_path / "race.db"

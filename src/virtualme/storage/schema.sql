@@ -59,6 +59,9 @@ CREATE TABLE IF NOT EXISTS persona_triples (
     source_turn_ids TEXT NOT NULL,
     confidence REAL DEFAULT 1.0,
     embedding BLOB,
+    active INTEGER NOT NULL DEFAULT 1,
+    archived_at TEXT,
+    archive_reason TEXT,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 

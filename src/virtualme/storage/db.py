@@ -205,43 +205,72 @@ async def _apply_schema_migrations(conn: aiosqlite.Connection) -> None:
     cursor = await conn.execute(
         "SELECT name FROM sqlite_master WHERE type='table' AND name='anchors'"
     )
-    if not await cursor.fetchone():
-        return
+    if await cursor.fetchone():
+        cursor = await conn.execute("PRAGMA table_info(anchors)")
+        existing_anchor_columns = {row[1] for row in await cursor.fetchall()}
 
-    cursor = await conn.execute("PRAGMA table_info(anchors)")
-    existing_anchor_columns = {row[1] for row in await cursor.fetchall()}
+        anchor_migrations: list[tuple[str, str]] = [
+            (
+                "source_question_ids",
+                "ALTER TABLE anchors "
+                "ADD COLUMN source_question_ids TEXT NOT NULL DEFAULT '[]'",
+            ),
+            (
+                "active",
+                "ALTER TABLE anchors ADD COLUMN active INTEGER NOT NULL DEFAULT 1",
+            ),
+            (
+                "archived_at",
+                "ALTER TABLE anchors ADD COLUMN archived_at TEXT",
+            ),
+            (
+                "archive_reason",
+                "ALTER TABLE anchors ADD COLUMN archive_reason TEXT",
+            ),
+            # v0.5+ anchor migrations append here
+        ]
 
-    anchor_migrations: list[tuple[str, str]] = [
-        (
-            "source_question_ids",
-            "ALTER TABLE anchors "
-            "ADD COLUMN source_question_ids TEXT NOT NULL DEFAULT '[]'",
-        ),
-        (
-            "active",
-            "ALTER TABLE anchors ADD COLUMN active INTEGER NOT NULL DEFAULT 1",
-        ),
-        (
-            "archived_at",
-            "ALTER TABLE anchors ADD COLUMN archived_at TEXT",
-        ),
-        (
-            "archive_reason",
-            "ALTER TABLE anchors ADD COLUMN archive_reason TEXT",
-        ),
-        # v0.5+ anchor migrations append here
-    ]
+        for column_name, sql in anchor_migrations:
+            if column_name in existing_anchor_columns:
+                continue
+            try:
+                await conn.execute(sql)
+            except aiosqlite.OperationalError as exc:
+                # Race condition: another process added the column between
+                # our PRAGMA check and ALTER. Treat as already-migrated.
+                if "duplicate column" not in str(exc).lower():
+                    raise
 
-    for column_name, sql in anchor_migrations:
-        if column_name in existing_anchor_columns:
-            continue
-        try:
-            await conn.execute(sql)
-        except aiosqlite.OperationalError as exc:
-            # Race condition: another process added the column between
-            # our PRAGMA check and ALTER. Treat as already-migrated.
-            if "duplicate column" not in str(exc).lower():
-                raise
+    cursor = await conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='persona_triples'"
+    )
+    if await cursor.fetchone():
+        cursor = await conn.execute("PRAGMA table_info(persona_triples)")
+        existing_triple_columns = {row[1] for row in await cursor.fetchall()}
+
+        triple_migrations: list[tuple[str, str]] = [
+            (
+                "active",
+                "ALTER TABLE persona_triples ADD COLUMN active INTEGER NOT NULL DEFAULT 1",
+            ),
+            (
+                "archived_at",
+                "ALTER TABLE persona_triples ADD COLUMN archived_at TEXT",
+            ),
+            (
+                "archive_reason",
+                "ALTER TABLE persona_triples ADD COLUMN archive_reason TEXT",
+            ),
+        ]
+
+        for column_name, sql in triple_migrations:
+            if column_name in existing_triple_columns:
+                continue
+            try:
+                await conn.execute(sql)
+            except aiosqlite.OperationalError as exc:
+                if "duplicate column" not in str(exc).lower():
+                    raise
 
     await conn.execute(
         """
@@ -560,6 +589,57 @@ class DB:
                 )
             await conn.commit()
         return cur.rowcount
+
+    async def restart_interview(
+        self, interviewee_id: str, *, reason: str = "interview_restart"
+    ) -> dict[str, int]:
+        """Soft-archive active interview memory and reset progress for a fresh run."""
+        async with self._connect() as conn:
+            anchor_cur = await conn.execute(
+                """
+                UPDATE anchors
+                SET active = 0,
+                    archived_at = CURRENT_TIMESTAMP,
+                    archive_reason = ?
+                WHERE interviewee_id = ?
+                  AND active = 1
+                """,
+                (reason, interviewee_id),
+            )
+            triple_cur = await conn.execute(
+                """
+                UPDATE persona_triples
+                SET active = 0,
+                    archived_at = CURRENT_TIMESTAMP,
+                    archive_reason = ?
+                WHERE interviewee_id = ?
+                  AND active = 1
+                """,
+                (reason, interviewee_id),
+            )
+            session_cur = await conn.execute(
+                """
+                UPDATE sessions
+                SET ended_at = CURRENT_TIMESTAMP,
+                    status = 'archived',
+                    current_question_id = NULL,
+                    notes = COALESCE(notes || char(10), '') ||
+                        'archived_reason=' || ? || '; original_week=' || week,
+                    week = -id
+                WHERE interviewee_id = ?
+                """,
+                (reason, interviewee_id),
+            )
+            await conn.execute(
+                "DELETE FROM question_state WHERE interviewee_id = ?",
+                (interviewee_id,),
+            )
+            await conn.commit()
+        return {
+            "anchors": anchor_cur.rowcount,
+            "triples": triple_cur.rowcount,
+            "sessions": session_cur.rowcount,
+        }
 
     async def claim_transport_event(
         self,
@@ -979,13 +1059,15 @@ class DB:
             await conn.commit()
         return int(cur.lastrowid)
 
-    async def load_triples(self, interviewee_id: str):
+    async def load_triples(self, interviewee_id: str, *, active_only: bool = True):
         from virtualme.interview.triples import PersonaTriple
 
+        active_clause = "AND active = 1" if active_only else ""
         async with self._connect() as conn:
             conn.row_factory = aiosqlite.Row
             cur = await conn.execute(
-                "SELECT * FROM persona_triples WHERE interviewee_id = ? ORDER BY created_at",
+                "SELECT * FROM persona_triples "
+                f"WHERE interviewee_id = ? {active_clause} ORDER BY created_at",
                 (interviewee_id,),
             )
             rows = await cur.fetchall()

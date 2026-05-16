@@ -8,9 +8,11 @@ from virtualme.interview import byok
 from virtualme.interview.anchor_extractor import extract_anchors
 from virtualme.interview.commands import (
     DIMENSION_LABELS,
+    RestartRequest,
     RetalkRequest,
     StatusQuery,
     detect_command,
+    format_restart_reply,
     format_retalk_needs_dimension,
     format_retalk_reply,
     format_status_reply,
@@ -92,7 +94,9 @@ async def process_turn(
     if command is not None:
         # Meta-commands (status query / re-talk) are handled and replied to
         # without running depth/anchor extraction on the message.
-        return await _handle_command(command, interviewee_id, incoming_message, session, db, selector)
+        return await _handle_command(
+            command, interviewee_id, incoming_message, session, db, selector, settings
+        )
     turn_count = await db.count_turns(session.id)
     scrub_result = scrub_pii(incoming_message)
     if scrub_result.redactions:
@@ -365,14 +369,23 @@ async def _auto_export_if_sufficient(
 
 
 async def _handle_command(
-    command: StatusQuery | RetalkRequest,
+    command: StatusQuery | RetalkRequest | RestartRequest,
     interviewee_id: str,
     incoming_message: str,
     session: Session,
     db: DB,
     selector: QuestionSelector,
+    settings: Settings,
 ) -> str:
     """Reply to a meta-command. Saves the turn pair but runs no extraction."""
+    if isinstance(command, RestartRequest):
+        scrub_result = scrub_pii(incoming_message)
+        user_turn = await db.save_turn(session.id, "user", scrub_result.scrubbed_text)
+        await db.save_redactions(user_turn.id, scrub_result.redactions)
+        reply, new_session = await _handle_restart(interviewee_id, db, selector, settings)
+        await db.save_turn(new_session.id, "assistant", reply)
+        return reply
+
     if isinstance(command, StatusQuery):
         current_question = await _resolve_current_question(
             db, selector, session.id, session.week
@@ -392,6 +405,28 @@ async def _handle_command(
     await db.save_redactions(user_turn.id, scrub_result.redactions)
     await db.save_turn(session.id, "assistant", reply)
     return reply
+
+
+async def _handle_restart(
+    interviewee_id: str,
+    db: DB,
+    selector: QuestionSelector,
+    settings: Settings,
+) -> tuple[str, Session]:
+    archive_note = "已先輸出目前的 markdown archive 快照。"
+    try:
+        paths = await auto_export_persona(db, interviewee_id, settings.persona_export_dir)
+        archive_note = f"已先輸出目前的 markdown archive 快照: {len(paths)} files。"
+    except Exception as exc:
+        logger.error("Restart archive export failed for %s: %s", interviewee_id, exc)
+        archive_note = "markdown archive 快照輸出失敗; DB 內仍會保留封存資料。"
+
+    archived_counts = await db.restart_interview(interviewee_id)
+    new_session = await db.get_or_create_session(interviewee_id, week=1)
+    first_question = _default_question(selector, 1)
+    await db.set_current_question_id(new_session.id, first_question.id)
+    await db.record_question_asked(interviewee_id, first_question.id, 1)
+    return format_restart_reply(archive_note, archived_counts, first_question.text), new_session
 
 
 async def _handle_retalk(

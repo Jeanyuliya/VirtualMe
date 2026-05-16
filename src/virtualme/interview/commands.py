@@ -80,6 +80,20 @@ RETALK_KEYWORDS = [
     "retalk",
 ]
 
+RESTART_KEYWORDS = [
+    "重頭開始",
+    "從頭開始",
+    "重新開始萃取",
+    "重頭開始萃取",
+    "全部重來",
+    "全部重新",
+    "整個訪談重來",
+    "整個萃取重來",
+    "restart interview",
+    "restart extraction",
+    "start over",
+]
+
 
 @dataclass
 class StatusQuery:
@@ -94,7 +108,12 @@ class RetalkRequest:
     dimension: Dimension | None
 
 
-InterviewCommand = StatusQuery | RetalkRequest
+@dataclass
+class RestartRequest:
+    """User asked to restart the whole extraction run."""
+
+
+InterviewCommand = StatusQuery | RetalkRequest | RestartRequest
 
 
 def _match_dimension(text: str) -> Dimension | None:
@@ -110,6 +129,8 @@ def detect_command(message: str) -> InterviewCommand | None:
     if not stripped or len(stripped) > COMMAND_MAX_LEN:
         return None
     text = stripped.lower()
+    if any(keyword in text for keyword in RESTART_KEYWORDS):
+        return RestartRequest()
     if any(keyword in text for keyword in RETALK_KEYWORDS):
         return RetalkRequest(dimension=_match_dimension(text))
     if any(keyword in text for keyword in STATUS_KEYWORDS):
@@ -175,4 +196,15 @@ def format_retalk_needs_dimension() -> str:
         "你想重談哪一塊呢？可選的人格維度有：\n"  # noqa: RUF001
         f"{blocks}。\n"
         "跟我說「重談 + 維度名稱」就可以了。"
+    )
+
+
+def format_restart_reply(archive_note: str, archived_counts: dict[str, int], first_question: str) -> str:
+    return (
+        "好, 我會從頭開始萃取。\n"
+        f"{archive_note}\n"
+        "舊資料已封存, 不會刪除; 新的萃取會從 0 開始累積。\n"
+        f"封存摘要: anchors {archived_counts['anchors']}, "
+        f"triples {archived_counts['triples']}, sessions {archived_counts['sessions']}。\n"
+        f"{first_question}"
     )
