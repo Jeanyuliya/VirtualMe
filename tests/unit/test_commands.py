@@ -170,10 +170,32 @@ async def test_process_turn_light_greeting_starts_first_question(tmp_path):
 
     reply = await process_turn("u1", "哈囉", _Claude(), db, selector, settings)
 
-    assert reply == "繁中第一題"
+    assert "近況" in reply
+    assert "繁中第一題" in reply
     assert await db.get_current_question_id(1) == "Q1"
     turns = await db.load_session_turns(1)
     assert [turn.role for turn in turns] == ["user", "assistant"]
+
+
+async def test_process_turn_light_greeting_resumes_known_progress(tmp_path):
+    db = await _new_db(tmp_path)
+    selector = QuestionSelector(
+        {
+            1: [Question(id="Q1", week=1, dimension=Dimension.STATE, text="State question")],
+            2: [Question(id="QV", week=2, dimension=Dimension.VOICE, text="Voice question")],
+        }
+    )
+    settings = Settings(anthropic_api_key=SecretStr("k"))
+    session = await db.get_or_create_session("u1", week=1)
+    await db.set_current_question_id(session.id, "QV")
+    await db.save_turn(session.id, "assistant", "請談談你的說話方式。")
+
+    reply = await process_turn("u1", "哈囉", _Claude(), db, selector, settings)
+
+    assert "語氣・表達" in reply
+    assert "剛才問的是" in reply
+    assert "請談談你的說話方式。" in reply
+    assert await db.get_current_question_id(session.id) == "QV"
 
 
 async def test_process_turn_retalk_pins_dimension_question(tmp_path):

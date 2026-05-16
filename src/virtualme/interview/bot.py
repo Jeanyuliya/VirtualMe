@@ -105,16 +105,15 @@ async def process_turn(
             settings,
         )
     turn_count = await db.count_turns(session.id)
-    if turn_count == 0 and _is_light_greeting(incoming_message):
-        scrub_result = scrub_pii(incoming_message)
-        user_turn = await db.save_turn(session.id, "user", scrub_result.scrubbed_text)
-        await db.save_redactions(user_turn.id, scrub_result.redactions)
-        first_question = _default_question(selector, session.week)
-        await db.set_current_question_id(session.id, first_question.id)
-        await db.record_question_asked(interviewee_id, first_question.id, session.week)
-        reply = await _final_reply(interviewee_id, first_question, active_client, db)
-        await db.save_turn(session.id, "assistant", reply)
-        return reply
+    if _is_light_greeting(incoming_message):
+        return await _handle_light_greeting(
+            interviewee_id,
+            incoming_message,
+            session,
+            active_client,
+            db,
+            selector,
+        )
 
     scrub_result = scrub_pii(incoming_message)
     if scrub_result.redactions:
@@ -377,6 +376,40 @@ def _is_light_greeting(text: str) -> bool:
     return stripped in greetings
 
 
+async def _handle_light_greeting(
+    interviewee_id: str,
+    incoming_message: str,
+    session: Session,
+    active_client: AsyncAnthropic,
+    db: DB,
+    selector: QuestionSelector,
+) -> str:
+    """Resume from known progress instead of classifying a greeting as an answer."""
+    scrub_result = scrub_pii(incoming_message)
+    user_turn = await db.save_turn(session.id, "user", scrub_result.scrubbed_text)
+    await db.save_redactions(user_turn.id, scrub_result.redactions)
+
+    question = await _current_pool_question(db, selector, session.id, session.week)
+    if await db.get_current_question_id(session.id) is None:
+        await db.set_current_question_id(session.id, question.id)
+        await db.record_question_asked(interviewee_id, question.id, session.week)
+
+    last_asked = await db.get_last_assistant_content(session.id)
+    if last_asked:
+        reply = (
+            f"嗨, 我們目前在【{DIMENSION_LABELS[question.dimension]}】這一塊。\n"
+            f"剛才問的是:\n{last_asked}"
+        )
+    else:
+        rendered_question = await _final_reply(interviewee_id, question, active_client, db)
+        reply = (
+            f"嗨, 我們從【{DIMENSION_LABELS[question.dimension]}】開始。\n"
+            f"{rendered_question}"
+        )
+    await db.save_turn(session.id, "assistant", reply)
+    return reply
+
+
 async def _auto_export_if_sufficient(
     db: DB,
     interviewee_id: str,
@@ -517,19 +550,25 @@ def _first_question_for_dimension(
 async def _resolve_current_question(
     db: DB, selector: QuestionSelector, session_id: int, week: int
 ) -> Question:
-    base = _default_question(selector, week)
-    question_id = await db.get_current_question_id(session_id)
-    if question_id:
-        for question in _all_questions(selector):
-            if question.id == question_id:
-                base = question
-                break
+    base = await _current_pool_question(db, selector, session_id, week)
     last_asked = await db.get_last_assistant_content(session_id)
     if last_asked:
         # The previous bot turn is what the current answer actually responds to
         # (a pool question OR a generated follow-up). Keep the pool question id
         # for triangulation; reflect the real wording for depth/anchor context.
         return base.model_copy(update={"text": last_asked})
+    return base
+
+
+async def _current_pool_question(
+    db: DB, selector: QuestionSelector, session_id: int, week: int
+) -> Question:
+    base = _default_question(selector, week)
+    question_id = await db.get_current_question_id(session_id)
+    if question_id:
+        for question in _all_questions(selector):
+            if question.id == question_id:
+                return question
     return base
 
 
