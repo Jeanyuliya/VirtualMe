@@ -63,19 +63,23 @@ async def process_turn(
     await db.record_question_answered(interviewee_id, current_question.id, session.week, depth.value)
     all_anchors = [anchor for anchors in anchors_by_dimension.values() for anchor in anchors]
     rule = select_rule(scrub_result.scrubbed_text, depth, all_anchors)
+
+    # Mine anchors from every answer: the follow-up decision below only changes
+    # what the bot asks next, not whether this turn is extracted.
+    extracted_anchors = await extract_anchors(user_turn, current_question, claude)
+    for anchor in extracted_anchors:
+        await db.save_anchor(
+            interviewee_id,
+            anchor.dimension,
+            anchor.layer,
+            anchor.content,
+            anchor.source_turn_ids,
+            anchor.source_question_ids,
+        )
+
     if rule and depth != Layer.PRINCIPLE:
         reply = await generate_follow_up(rule, scrub_result.scrubbed_text, current_question.text, claude)
     else:
-        extracted = await extract_anchors(user_turn, current_question, claude)
-        for anchor in extracted:
-            await db.save_anchor(
-                interviewee_id,
-                anchor.dimension,
-                anchor.layer,
-                anchor.content,
-                anchor.source_turn_ids,
-                anchor.source_question_ids,
-            )
         next_question = selector.select_next(
             session,
             scrub_result.scrubbed_text,
@@ -117,11 +121,23 @@ async def process_turn(
 async def _resolve_current_question(
     db: DB, selector: QuestionSelector, session_id: int, week: int
 ) -> Question:
+    base = _default_question(selector, week)
     question_id = await db.get_current_question_id(session_id)
     if question_id:
         for question in _all_questions(selector):
             if question.id == question_id:
-                return question
+                base = question
+                break
+    last_asked = await db.get_last_assistant_content(session_id)
+    if last_asked:
+        # The previous bot turn is what the current answer actually responds to
+        # (a pool question OR a generated follow-up). Keep the pool question id
+        # for triangulation; reflect the real wording for depth/anchor context.
+        return base.model_copy(update={"text": last_asked})
+    return base
+
+
+def _default_question(selector: QuestionSelector, week: int) -> Question:
     return (selector.question_pool.get(week) or [DEFAULT_QUESTION])[0]
 
 

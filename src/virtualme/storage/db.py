@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from enum import StrEnum
@@ -296,21 +297,42 @@ class DB:
         return {row[0] for row in rows}
 
     async def save_turn(self, session_id: int, role: str, content: str) -> Turn:
-        digest = hashlib.sha256(f"{session_id}:{role}:{content}".encode()).hexdigest()
+        # Turns are an append-only event log: the autoincrement id is the turn identity.
+        # content_hash carries a per-turn nonce so repeated answers are not folded by
+        # the UNIQUE constraint. Transport-level idempotency belongs in the webhook
+        # layer using the platform message id, not here via content hashing.
+        digest = hashlib.sha256(
+            f"{session_id}:{role}:{content}:{time.time_ns()}".encode()
+        ).hexdigest()
         async with self._connect() as conn:
             conn.row_factory = aiosqlite.Row
-            await conn.execute(
+            cur = await conn.execute(
                 """
-                INSERT OR IGNORE INTO turns(session_id, role, content, content_hash)
+                INSERT INTO turns(session_id, role, content, content_hash)
                 VALUES (?, ?, ?, ?)
                 """,
                 (session_id, role, content, digest),
             )
             await conn.commit()
             row = await (
-                await conn.execute("SELECT * FROM turns WHERE content_hash = ?", (digest,))
+                await conn.execute("SELECT * FROM turns WHERE id = ?", (cur.lastrowid,))
             ).fetchone()
         return Turn(**dict(row))
+
+    async def get_last_assistant_content(self, session_id: int) -> str | None:
+        async with self._connect() as conn:
+            row = await (
+                await conn.execute(
+                    """
+                    SELECT content FROM turns
+                    WHERE session_id = ? AND role = 'assistant'
+                    ORDER BY id DESC
+                    LIMIT 1
+                    """,
+                    (session_id,),
+                )
+            ).fetchone()
+        return str(row[0]) if row else None
 
     async def save_redactions(self, turn_id: int, redactions: list[Redaction]) -> None:
         if not redactions:

@@ -38,6 +38,8 @@ class _Messages:
             )
         elif max_tokens == 80:
             text = "Could you give me one concrete example?"
+        elif max_tokens == 180:
+            text = prompt.split("Ask this next: ", 1)[1]
         else:
             text = "OK"
         return type("Response", (), {"content": [_Content(text)]})
@@ -127,6 +129,28 @@ async def test_follow_up_branch_does_not_advance_current_question(tmp_path):
     await process_turn("u1", "A short fact.", claude, db, selector, settings)
 
     assert await _session_current_question_id(db, session.id) == "Q2"
+
+
+async def test_follow_up_branch_still_extracts_anchor(tmp_path):
+    db = DB(str(tmp_path / "virtualme.db"))
+    await db.init()
+    settings = Settings(anthropic_api_key=SecretStr("test"), use_ppa=False)
+    q2 = Question(
+        id="Q2",
+        week=1,
+        dimension=Dimension.SKILL,
+        text="What skill matters most?",
+    )
+    selector = _FixedSelector(q2)
+    claude = _Claude(depth="fact")
+    session = await db.get_or_create_session("u1", week=1)
+    await db.set_current_question_id(session.id, "Q2")
+
+    await process_turn("u1", "A short fact.", claude, db, selector, settings)
+
+    summary = await db.load_anchors_summary("u1")
+    assert summary[Dimension.SKILL][0].content == "directness over deference"
+    assert summary[Dimension.SKILL][0].source_question_ids == ["Q2"]
 
 
 async def test_selector_none_does_not_persist_default_question(tmp_path):
