@@ -6,6 +6,15 @@ from virtualme.config import Settings
 from virtualme.export.auto import auto_export_persona
 from virtualme.interview import byok
 from virtualme.interview.anchor_extractor import extract_anchors
+from virtualme.interview.commands import (
+    DIMENSION_LABELS,
+    RetalkRequest,
+    StatusQuery,
+    detect_command,
+    format_retalk_needs_dimension,
+    format_retalk_reply,
+    format_status_reply,
+)
 from virtualme.interview.depth_evaluator import evaluate_depth
 from virtualme.interview.follow_up import generate_follow_up, select_rule
 from virtualme.interview.models import MODEL_DEEP
@@ -15,7 +24,7 @@ from virtualme.interview.session_lifecycle import (
     finalize_session_if_closing,
     is_persona_sufficient,
 )
-from virtualme.storage.db import DB, Dimension, Layer, Question
+from virtualme.storage.db import DB, Dimension, Layer, Question, Session
 
 logger = logging.getLogger(__name__)
 
@@ -65,6 +74,11 @@ async def process_turn(
         else await db.get_current_week(interviewee_id, max_week)
     )
     session = await db.get_or_create_session(interviewee_id, week=week)
+    command = detect_command(incoming_message)
+    if command is not None:
+        # Meta-commands (status query / re-talk) are handled and replied to
+        # without running depth/anchor extraction on the message.
+        return await _handle_command(command, interviewee_id, incoming_message, session, db, selector)
     turn_count = await db.count_turns(session.id)
     scrub_result = scrub_pii(incoming_message)
     if scrub_result.redactions:
@@ -167,6 +181,61 @@ async def _auto_export_if_sufficient(
         logger.info("Persona archive exported for %s: %s files", interviewee_id, len(paths))
     except Exception as exc:
         logger.error("Persona auto-export failed for %s: %s", interviewee_id, exc)
+
+
+async def _handle_command(
+    command: StatusQuery | RetalkRequest,
+    interviewee_id: str,
+    incoming_message: str,
+    session: Session,
+    db: DB,
+    selector: QuestionSelector,
+) -> str:
+    """Reply to a meta-command. Saves the turn pair but runs no extraction."""
+    if isinstance(command, StatusQuery):
+        current_question = await _resolve_current_question(
+            db, selector, session.id, session.week
+        )
+        anchors = await db.load_anchors_summary(interviewee_id)
+        covered = [dimension for dimension in Dimension if anchors.get(dimension)]
+        reply = format_status_reply(current_question.dimension, covered)
+    else:
+        reply = await _handle_retalk(command, interviewee_id, session, db, selector)
+
+    scrub_result = scrub_pii(incoming_message)
+    user_turn = await db.save_turn(session.id, "user", scrub_result.scrubbed_text)
+    await db.save_redactions(user_turn.id, scrub_result.redactions)
+    await db.save_turn(session.id, "assistant", reply)
+    return reply
+
+
+async def _handle_retalk(
+    command: RetalkRequest,
+    interviewee_id: str,
+    session: Session,
+    db: DB,
+    selector: QuestionSelector,
+) -> str:
+    if command.dimension is None:
+        return format_retalk_needs_dimension()
+    question = _first_question_for_dimension(selector, command.dimension)
+    if question is None:
+        # No pooled question for that dimension — acknowledge with an open ask.
+        label = DIMENSION_LABELS[command.dimension]
+        return format_retalk_reply(command.dimension, f"請再多談談關於「{label}」的部分。")
+    # Pin the dimension's question so the next answer is attributed to it.
+    await db.set_current_question_id(session.id, question.id)
+    await db.record_question_asked(interviewee_id, question.id, session.week)
+    return format_retalk_reply(command.dimension, question.text)
+
+
+def _first_question_for_dimension(
+    selector: QuestionSelector, dimension: Dimension
+) -> Question | None:
+    for question in _all_questions(selector):
+        if question.dimension == dimension:
+            return question
+    return None
 
 
 async def _resolve_current_question(
