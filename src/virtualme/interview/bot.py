@@ -3,6 +3,7 @@ import logging
 from anthropic import AsyncAnthropic
 
 from virtualme.config import Settings
+from virtualme.export.auto import auto_export_persona
 from virtualme.interview import byok
 from virtualme.interview.anchor_extractor import extract_anchors
 from virtualme.interview.depth_evaluator import evaluate_depth
@@ -10,7 +11,10 @@ from virtualme.interview.follow_up import generate_follow_up, select_rule
 from virtualme.interview.models import MODEL_DEEP
 from virtualme.interview.pii import scrub_pii
 from virtualme.interview.question_selector import QuestionSelector
-from virtualme.interview.session_lifecycle import finalize_session_if_closing
+from virtualme.interview.session_lifecycle import (
+    finalize_session_if_closing,
+    is_persona_sufficient,
+)
 from virtualme.storage.db import DB, Dimension, Layer, Question
 
 logger = logging.getLogger(__name__)
@@ -132,7 +136,37 @@ async def process_turn(
     )
     if extracted:
         logger.info("Session %s closed: extracted %s triples", session.id, extracted)
+        await _auto_export_if_sufficient(
+            db, interviewee_id, session.week, max_week, settings
+        )
     return reply
+
+
+async def _auto_export_if_sufficient(
+    db: DB,
+    interviewee_id: str,
+    round_number: int,
+    max_rounds: int,
+    settings: Settings,
+) -> None:
+    """Export the 8-dimension persona archive — but only once extraction is
+    judged sufficient. An incomplete interview leaves its anchors staged in the
+    DB; nothing is written to disk until `is_persona_sufficient` is met.
+    """
+    if not settings.persona_auto_export:
+        return
+    anchors = await db.load_anchors_summary(interviewee_id)
+    if not is_persona_sufficient(round_number, max_rounds, anchors):
+        logger.info(
+            "Persona extraction for %s not yet sufficient; archive staged in DB, not exported",
+            interviewee_id,
+        )
+        return
+    try:
+        paths = await auto_export_persona(db, interviewee_id, settings.persona_export_dir)
+        logger.info("Persona archive exported for %s: %s files", interviewee_id, len(paths))
+    except Exception as exc:
+        logger.error("Persona auto-export failed for %s: %s", interviewee_id, exc)
 
 
 async def _resolve_current_question(

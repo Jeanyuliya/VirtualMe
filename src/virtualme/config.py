@@ -57,6 +57,14 @@ class Settings(BaseSettings):
         "./data/keys",
         validation_alias=AliasChoices("byok_keys_dir", "VIRTUALME_BYOK_KEYS_DIR"),
     )
+    persona_auto_export: bool = Field(
+        False,
+        validation_alias=AliasChoices("persona_auto_export", "VIRTUALME_PERSONA_AUTO_EXPORT"),
+    )
+    persona_export_dir: str = Field(
+        "./data/personas",
+        validation_alias=AliasChoices("persona_export_dir", "VIRTUALME_PERSONA_EXPORT_DIR"),
+    )
 
 
 def sqlite_path(database_url: str) -> str:
