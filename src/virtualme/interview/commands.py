@@ -16,6 +16,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from virtualme.storage.db import Dimension
+from virtualme.subject import CompletenessReport
 
 # Commands are short. Anything longer is treated as a real interview answer.
 COMMAND_MAX_LEN = 40
@@ -54,6 +55,12 @@ STATUS_KEYWORDS = [
     "哪一個維度",
     "目前進度",
     "訪談進度",
+    "萃取進度",
+    "完成度",
+    "有哪些主題",
+    "八大主題",
+    "訪談範圍",
+    "萃取範圍",
     "到哪了",
     "which block",
     "which dimension",
@@ -113,6 +120,7 @@ def detect_command(message: str) -> InterviewCommand | None:
 def format_status_reply(
     current_dimension: Dimension,
     covered_dimensions: list[Dimension],
+    completeness: CompletenessReport | None = None,
 ) -> str:
     current = DIMENSION_LABELS[current_dimension]
     if covered_dimensions:
@@ -120,11 +128,40 @@ def format_status_reply(
         covered_line = f"目前已經收集到的維度：{covered}。"  # noqa: RUF001
     else:
         covered_line = "目前還沒有任何維度收集到內容。"
-    return (
+    lines = [
         f"我們現在正在收集的人格維度是【{current}】。\n"
-        f"{covered_line}\n"
-        "如果想重談某一塊，可以跟我說「重談 + 維度名稱」（例如「重談 人際關係」）。"  # noqa: RUF001
+        f"{covered_line}",
+        "",
+        "八大萃取主題:",
+    ]
+    if completeness is None:
+        for dimension in Dimension:
+            marker = " ← 目前" if dimension == current_dimension else ""
+            lines.append(f"- {DIMENSION_LABELS[dimension]}{marker}")
+    else:
+        by_dimension = {score.dimension: score for score in completeness.per_dimension}
+        for dimension in Dimension:
+            score = by_dimension[dimension]
+            marker = " ← 目前" if dimension == current_dimension else ""
+            lines.append(
+                f"- {DIMENSION_LABELS[dimension]}: {score.coverage:.0%} "
+                f"({score.anchor_count} anchors, {score.triangulated_count} confirmed){marker}"
+            )
+        lines.extend(
+            [
+                "",
+                f"總完成度: {completeness.total_score:.1f}%",
+            ]
+        )
+        if completeness.weakest is not None:
+            lines.append(f"目前最缺: {DIMENSION_LABELS[completeness.weakest]}")
+    lines.extend(
+        [
+            "",
+            "如果想重談某一塊，可以跟我說「重談 + 維度名稱」（例如「重談 人際關係」）。",  # noqa: RUF001
+        ]
     )
+    return "\n".join(lines)
 
 
 def format_retalk_reply(dimension: Dimension, question_text: str) -> str:

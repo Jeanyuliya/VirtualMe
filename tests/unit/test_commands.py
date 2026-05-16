@@ -16,6 +16,8 @@ from virtualme.storage.db import DB, Dimension, Layer, Question
 def test_detect_status_query():
     assert isinstance(detect_command("現在在問什麼"), StatusQuery)
     assert isinstance(detect_command("我們收集到哪一塊了"), StatusQuery)
+    assert isinstance(detect_command("萃取進度"), StatusQuery)
+    assert isinstance(detect_command("有哪些主題"), StatusQuery)
     assert isinstance(detect_command("which dimension are we on"), StatusQuery)
 
 
@@ -62,9 +64,38 @@ async def test_process_turn_status_query_reports_current_dimension(tmp_path):
     reply = await process_turn("u1", "現在在問什麼", object(), db, selector, settings)
 
     assert "近況" in reply  # STATE label
+    assert "八大萃取主題" in reply
+    assert "總完成度" in reply
+    assert "語氣・表達" in reply
+    assert "界線・原則" in reply
     turns = await db.load_session_turns(1)
     assert len(turns) == 2  # turn pair saved, no extraction
     assert await db.load_anchors_summary("u1") == {} or not await db.load_triples("u1")
+
+
+async def test_process_turn_status_query_reports_completion_progress(tmp_path):
+    db = await _new_db(tmp_path)
+    selector = QuestionSelector(
+        {1: [Question(id="QV", week=1, dimension=Dimension.VOICE, text="Voice question")]}
+    )
+    settings = Settings(anthropic_api_key=SecretStr("k"))
+    await db.save_anchor("u1", Dimension.VOICE, Layer.PRINCIPLE, "plain voice", [1], ["QV"])
+    await db.save_anchor(
+        "u1",
+        Dimension.BOUNDARIES,
+        Layer.PRINCIPLE,
+        "no private details",
+        [1],
+        ["Q1", "Q2", "Q3"],
+    )
+    await db.save_anchor("u1", Dimension.BOUNDARIES, Layer.FACT, "privacy boundary", [2], ["Q4"])
+    await db.save_anchor("u1", Dimension.BOUNDARIES, Layer.FACT, "human review", [3], ["Q5"])
+
+    reply = await process_turn("u1", "萃取進度", object(), db, selector, settings)
+
+    assert "語氣・表達: 33%" in reply
+    assert "界線・原則: 100%" in reply
+    assert "目前最缺" in reply
 
 
 async def test_process_turn_retalk_pins_dimension_question(tmp_path):

@@ -27,6 +27,7 @@ from virtualme.interview.session_lifecycle import (
     is_session_closing,
 )
 from virtualme.storage.db import DB, Dimension, Question, Session
+from virtualme.subject import score_completeness
 
 logger = logging.getLogger(__name__)
 
@@ -378,7 +379,11 @@ async def _handle_command(
         )
         anchors = await db.load_anchors_summary(interviewee_id)
         covered = [dimension for dimension in Dimension if anchors.get(dimension)]
-        reply = format_status_reply(current_question.dimension, covered)
+        reply = format_status_reply(
+            current_question.dimension,
+            covered,
+            score_completeness(anchors),
+        )
     else:
         reply = await _handle_retalk(command, interviewee_id, session, db, selector)
 
