@@ -1,5 +1,6 @@
 """Tests for the BW5 BYOK gate."""
 
+import json
 import logging
 import stat
 
@@ -28,8 +29,15 @@ class _Messages:
     async def create(self, **kwargs):
         self.calls += 1
         max_tokens = kwargs["max_tokens"]
-        if max_tokens == 10:
-            text = "principle"
+        if max_tokens == 120:
+            text = json.dumps(
+                {
+                    "kind": "SUFFICIENT",
+                    "depth": "principle",
+                    "needs_follow_up": False,
+                    "confidence": 0.9,
+                }
+            )
         elif max_tokens in (500, 900):
             text = "[]"
         else:

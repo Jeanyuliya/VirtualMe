@@ -1,5 +1,7 @@
 """Tests for BW7 interview command detection (status query / re-talk)."""
 
+import json
+
 from pydantic import SecretStr
 
 from virtualme.config import Settings
@@ -90,8 +92,15 @@ class _Content:
 class _Messages:
     async def create(self, **kwargs):
         max_tokens = kwargs["max_tokens"]
-        if max_tokens == 10:
-            text = "principle"
+        if max_tokens == 120:
+            text = json.dumps(
+                {
+                    "kind": "SUFFICIENT",
+                    "depth": "principle",
+                    "needs_follow_up": False,
+                    "confidence": 0.9,
+                }
+            )
         elif max_tokens in (500, 900):
             text = "[]"
         else:

@@ -173,6 +173,34 @@ async def _apply_schema_migrations(conn: aiosqlite.Connection) -> None:
                 if "duplicate column" not in str(exc).lower():
                     raise
 
+    cursor = await conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='question_state'"
+    )
+    if await cursor.fetchone():
+        cursor = await conn.execute("PRAGMA table_info(question_state)")
+        existing_question_state_columns = {row[1] for row in await cursor.fetchall()}
+
+        question_state_migrations: list[tuple[str, str]] = [
+            (
+                "probe_count",
+                "ALTER TABLE question_state ADD COLUMN probe_count INTEGER NOT NULL DEFAULT 0",
+            ),
+            (
+                "non_answer_count",
+                "ALTER TABLE question_state "
+                "ADD COLUMN non_answer_count INTEGER NOT NULL DEFAULT 0",
+            ),
+        ]
+
+        for column_name, sql in question_state_migrations:
+            if column_name in existing_question_state_columns:
+                continue
+            try:
+                await conn.execute(sql)
+            except aiosqlite.OperationalError as exc:
+                if "duplicate column" not in str(exc).lower():
+                    raise
+
     # Anchors table migrations
     cursor = await conn.execute(
         "SELECT name FROM sqlite_master WHERE type='table' AND name='anchors'"
@@ -497,9 +525,88 @@ class DB:
                 )
                 VALUES (?, ?, ?, 0, ?)
                 ON CONFLICT(interviewee_id, question_id)
-                DO UPDATE SET answered_depth = excluded.answered_depth
+                DO UPDATE SET
+                    answered_depth = excluded.answered_depth,
+                    non_answer_count = 0
                 """,
                 (interviewee_id, question_id, week, depth),
+            )
+            await conn.commit()
+
+    async def get_probe_count(self, interviewee_id: str, question_id: str) -> int:
+        async with self._connect() as conn:
+            row = await (
+                await conn.execute(
+                    """
+                    SELECT probe_count
+                    FROM question_state
+                    WHERE interviewee_id = ? AND question_id = ?
+                    """,
+                    (interviewee_id, question_id),
+                )
+            ).fetchone()
+        return int(row[0]) if row else 0
+
+    async def record_question_probe(
+        self, interviewee_id: str, question_id: str, week: int
+    ) -> None:
+        async with self._connect() as conn:
+            await conn.execute(
+                """
+                INSERT INTO question_state(
+                    interviewee_id, question_id, week, asked_count, probe_count
+                )
+                VALUES (?, ?, ?, 0, 1)
+                ON CONFLICT(interviewee_id, question_id)
+                DO UPDATE SET
+                    probe_count = probe_count + 1,
+                    week = excluded.week
+                """,
+                (interviewee_id, question_id, week),
+            )
+            await conn.commit()
+
+    async def record_question_non_answer(
+        self, interviewee_id: str, question_id: str, week: int
+    ) -> int:
+        async with self._connect() as conn:
+            await conn.execute(
+                """
+                INSERT INTO question_state(
+                    interviewee_id, question_id, week, asked_count, non_answer_count
+                )
+                VALUES (?, ?, ?, 0, 1)
+                ON CONFLICT(interviewee_id, question_id)
+                DO UPDATE SET
+                    non_answer_count = non_answer_count + 1,
+                    week = excluded.week
+                """,
+                (interviewee_id, question_id, week),
+            )
+            row = await (
+                await conn.execute(
+                    """
+                    SELECT non_answer_count
+                    FROM question_state
+                    WHERE interviewee_id = ? AND question_id = ?
+                    """,
+                    (interviewee_id, question_id),
+                )
+            ).fetchone()
+            await conn.commit()
+        return int(row[0]) if row else 0
+
+    async def reset_question_non_answer(
+        self, interviewee_id: str, question_id: str
+    ) -> None:
+        async with self._connect() as conn:
+            await conn.execute(
+                """
+                UPDATE question_state
+                SET non_answer_count = 0
+                WHERE interviewee_id = ? AND question_id = ?
+                """,
+                (interviewee_id, question_id),
             )
             await conn.commit()
 

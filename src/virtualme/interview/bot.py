@@ -15,7 +15,7 @@ from virtualme.interview.commands import (
     format_retalk_reply,
     format_status_reply,
 )
-from virtualme.interview.depth_evaluator import evaluate_depth
+from virtualme.interview.depth_evaluator import TurnKind, evaluate_depth
 from virtualme.interview.follow_up import generate_follow_up, select_rule
 from virtualme.interview.lang import INTERVIEW_OUTPUT_LANGUAGE
 from virtualme.interview.models import MODEL_DEEP
@@ -24,8 +24,9 @@ from virtualme.interview.question_selector import QuestionSelector
 from virtualme.interview.session_lifecycle import (
     finalize_session_if_closing,
     is_persona_sufficient,
+    is_session_closing,
 )
-from virtualme.storage.db import DB, Dimension, Layer, Question, Session
+from virtualme.storage.db import DB, Dimension, Question, Session
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +37,7 @@ DEFAULT_QUESTION = Question(
     text="How has your work been this past week?",
     energy_tax="low",
 )
+MAX_PROBES_PER_QUESTION = 2
 
 INTERVIEW_ERROR_REPLY = (
     "抱歉，我這邊剛才出了點狀況，麻煩你再說一次。"  # noqa: RUF001
@@ -76,6 +78,16 @@ async def process_turn(
     )
     session = await db.get_or_create_session(interviewee_id, week=week)
     command = detect_command(incoming_message)
+    if is_session_closing(incoming_message):
+        return await _close_session(
+            interviewee_id,
+            incoming_message,
+            active_client,
+            db,
+            session,
+            settings,
+            max_week,
+        )
     if command is not None:
         # Meta-commands (status query / re-talk) are handled and replied to
         # without running depth/anchor extraction on the message.
@@ -94,25 +106,71 @@ async def process_turn(
     anchors_by_dimension = await db.load_anchors_summary(interviewee_id)
     asked_question_ids = await db.load_asked_question_ids(interviewee_id)
     current_question = await _resolve_current_question(db, selector, session.id, session.week)
-    depth = await evaluate_depth(scrub_result.scrubbed_text, current_question.text, active_client)
+    assessment = await evaluate_depth(
+        scrub_result.scrubbed_text, current_question.text, active_client
+    )
+    if assessment.parse_failed:
+        reply = _restate_current_question(current_question)
+        await db.save_turn(session.id, "assistant", reply)
+        return reply
+    if assessment.kind == TurnKind.META:
+        reply = await _handle_non_answer(
+            interviewee_id,
+            scrub_result.scrubbed_text,
+            current_question,
+            session,
+            selector,
+            settings,
+            active_client,
+            db,
+            is_meta=True,
+            anchors_by_dimension=anchors_by_dimension,
+            asked_question_ids=asked_question_ids,
+        )
+        await db.save_turn(session.id, "assistant", reply)
+        return reply
+    if assessment.kind == TurnKind.EVASION:
+        reply = await _handle_non_answer(
+            interviewee_id,
+            scrub_result.scrubbed_text,
+            current_question,
+            session,
+            selector,
+            settings,
+            active_client,
+            db,
+            is_meta=False,
+            anchors_by_dimension=anchors_by_dimension,
+            asked_question_ids=asked_question_ids,
+        )
+        await db.save_turn(session.id, "assistant", reply)
+        return reply
+
+    depth = assessment.depth
     await db.record_question_answered(interviewee_id, current_question.id, session.week, depth.value)
     all_anchors = [anchor for anchors in anchors_by_dimension.values() for anchor in anchors]
     rule = select_rule(scrub_result.scrubbed_text, depth, all_anchors)
 
-    # Mine anchors from every answer: the follow-up decision below only changes
-    # what the bot asks next, not whether this turn is extracted.
-    extracted_anchors = await extract_anchors(user_turn, current_question, active_client)
-    for anchor in extracted_anchors:
-        await db.save_anchor(
-            interviewee_id,
-            anchor.dimension,
-            anchor.layer,
-            anchor.content,
-            anchor.source_turn_ids,
-            anchor.source_question_ids,
-        )
+    if assessment.kind == TurnKind.SUFFICIENT:
+        extracted_anchors = await extract_anchors(user_turn, current_question, active_client)
+        for anchor in extracted_anchors:
+            await db.save_anchor(
+                interviewee_id,
+                anchor.dimension,
+                anchor.layer,
+                anchor.content,
+                anchor.source_turn_ids,
+                anchor.source_question_ids,
+            )
 
-    if rule and depth != Layer.PRINCIPLE:
+    probe_count = await db.get_probe_count(interviewee_id, current_question.id)
+    should_probe = (
+        assessment.needs_follow_up
+        and rule is not None
+        and probe_count < MAX_PROBES_PER_QUESTION
+    )
+    if should_probe:
+        await db.record_question_probe(interviewee_id, current_question.id, session.week)
         reply = await generate_follow_up(
             rule, scrub_result.scrubbed_text, current_question.text, active_client
         )
@@ -159,6 +217,106 @@ async def process_turn(
             db, interviewee_id, session.week, max_week, settings
         )
     return reply
+
+
+async def _close_session(
+    interviewee_id: str,
+    incoming_message: str,
+    active_client: AsyncAnthropic,
+    db: DB,
+    session: Session,
+    settings: Settings,
+    max_week: int,
+) -> str:
+    scrub_result = scrub_pii(incoming_message)
+    if scrub_result.redactions:
+        logger.info(
+            "PII redacted: %s items in closing turn from %s",
+            len(scrub_result.redactions),
+            interviewee_id,
+        )
+    user_turn = await db.save_turn(session.id, "user", scrub_result.scrubbed_text)
+    await db.save_redactions(user_turn.id, scrub_result.redactions)
+    reply = "好，今天先到這裡。我會把這段先整理起來。"  # noqa: RUF001
+    await db.save_turn(session.id, "assistant", reply)
+    turns_so_far = await db.load_session_turns(session.id)
+    extracted = await finalize_session_if_closing(
+        session_id=session.id,
+        interviewee_id=interviewee_id,
+        user_text=incoming_message,
+        turns=turns_so_far,
+        claude=active_client,
+        db=db,
+    )
+    if extracted:
+        logger.info("Session %s closed: extracted %s triples", session.id, extracted)
+        await _auto_export_if_sufficient(
+            db, interviewee_id, session.week, max_week, settings
+        )
+    return reply
+
+
+async def _handle_non_answer(
+    interviewee_id: str,
+    user_text: str,
+    current_question: Question,
+    session: Session,
+    selector: QuestionSelector,
+    settings: Settings,
+    active_client: AsyncAnthropic,
+    db: DB,
+    *,
+    is_meta: bool,
+    anchors_by_dimension: dict,
+    asked_question_ids: set[str],
+) -> str:
+    count = await db.record_question_non_answer(
+        interviewee_id, current_question.id, session.week
+    )
+    if count < 2:
+        if is_meta:
+            return _bridge_to_current_question(user_text, current_question)
+        return _rapport_to_current_question(current_question)
+
+    next_question = selector.select_next(
+        session,
+        user_text,
+        anchors_by_dimension,
+        energy=5,
+        asked_question_ids=asked_question_ids,
+        adaptive=settings.adaptive_extraction,
+    )
+    await db.reset_question_non_answer(interviewee_id, current_question.id)
+    if next_question is None:
+        if is_meta:
+            return _bridge_to_current_question(user_text, current_question)
+        return _rapport_to_current_question(current_question)
+
+    await db.set_current_question_id(session.id, next_question.id)
+    await db.record_question_asked(interviewee_id, next_question.id, session.week)
+    return await _final_reply(interviewee_id, next_question, active_client, db)
+
+
+def _restate_current_question(question: Question) -> str:
+    return f"我先回到剛才這題：{question.text}"  # noqa: RUF001
+
+
+def _bridge_to_current_question(user_text: str, question: Question) -> str:
+    if _asks_for_traditional_chinese(user_text):
+        prefix = "可以，我們用繁體中文。"  # noqa: RUF001
+    else:
+        prefix = "可以，我先記下這點。"  # noqa: RUF001
+    return f"{prefix}回到剛才這題：{question.text}"  # noqa: RUF001
+
+
+def _rapport_to_current_question(question: Question) -> str:
+    return f"我懂，這題先不用想太複雜。回到剛才這題：{question.text}"  # noqa: RUF001
+
+
+def _asks_for_traditional_chinese(text: str) -> bool:
+    lowered = text.lower()
+    markers = ("中文", "繁體", "繁中", "traditional chinese", "taiwan")
+    return any(marker in lowered for marker in markers)
 
 
 async def _auto_export_if_sufficient(

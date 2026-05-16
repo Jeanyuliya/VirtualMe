@@ -21,10 +21,17 @@ class _Messages:
     async def create(self, **kwargs):
         max_tokens = kwargs["max_tokens"]
         prompt = kwargs["messages"][0]["content"]
-        if max_tokens == 10:
+        if max_tokens == 120:
             question = prompt.split("Question: ", 1)[1].split("\n", 1)[0]
             self.depth_questions.append(question)
-            text = self.depth
+            text = json.dumps(
+                {
+                    "kind": "SUFFICIENT",
+                    "depth": self.depth,
+                    "needs_follow_up": self.depth != "principle",
+                    "confidence": 0.9,
+                }
+            )
         elif max_tokens == 500:
             question = prompt.split("Question: ", 1)[1].split("\n", 1)[0]
             text = json.dumps(

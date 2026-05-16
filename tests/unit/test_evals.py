@@ -1,3 +1,5 @@
+import json
+
 from virtualme.evals.__main__ import main
 from virtualme.evals.harness import load_fixtures, render_scorecard, run_eval
 
@@ -72,7 +74,19 @@ async def test_evals_cli_writes_scorecard_without_api_key(tmp_path, monkeypatch)
 
 async def test_run_eval_with_mock_claude_scores_depth():
     cases = load_fixtures()[:3]
-    claude = _Claude([case["expected_depth"] for case in cases])
+    claude = _Claude(
+        [
+            json.dumps(
+                {
+                    "kind": "SUFFICIENT",
+                    "depth": case["expected_depth"],
+                    "needs_follow_up": False,
+                    "confidence": 0.9,
+                }
+            )
+            for case in cases
+        ]
+    )
 
     report = await run_eval(cases, claude=claude)
 

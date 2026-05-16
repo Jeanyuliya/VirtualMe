@@ -1,4 +1,6 @@
-from virtualme.interview.depth_evaluator import evaluate_depth
+import json
+
+from virtualme.interview.depth_evaluator import TurnKind, evaluate_depth
 from virtualme.storage.db import Layer
 
 
@@ -20,18 +22,44 @@ class _Claude:
         self.messages = _Messages(text)
 
 
+def _assessment(kind: str = "SUFFICIENT", depth: str = "principle", follow_up: bool = False) -> str:
+    return json.dumps(
+        {
+            "kind": kind,
+            "depth": depth,
+            "needs_follow_up": follow_up,
+            "confidence": 0.9,
+        }
+    )
+
+
 async def test_depth_fact():
-    depth = await evaluate_depth("I yelled at my manager once", "What happened?", _Claude("fact"))
-    assert depth == Layer.FACT
+    assessment = await evaluate_depth(
+        "I yelled at my manager once", "What happened?", _Claude(_assessment(depth="fact"))
+    )
+    assert assessment.depth == Layer.FACT
+    assert assessment.kind == TurnKind.SUFFICIENT
 
 
 async def test_depth_pattern():
     answer = "I always speak my mind regardless of authority"
-    depth = await evaluate_depth(answer, "How do you handle authority?", _Claude("pattern"))
-    assert depth == Layer.PATTERN
+    assessment = await evaluate_depth(
+        answer, "How do you handle authority?", _Claude(_assessment(depth="pattern"))
+    )
+    assert assessment.depth == Layer.PATTERN
 
 
 async def test_depth_principle():
     answer = "I value directness because trust requires people to know where they stand"
-    depth = await evaluate_depth(answer, "What do you value?", _Claude("principle"))
-    assert depth == Layer.PRINCIPLE
+    assessment = await evaluate_depth(
+        answer, "What do you value?", _Claude(_assessment(depth="principle"))
+    )
+    assert assessment.depth == Layer.PRINCIPLE
+
+
+async def test_depth_parse_failure_is_conservative():
+    assessment = await evaluate_depth("answer", "Question?", _Claude("not json"))
+    assert assessment.kind == TurnKind.EVASION
+    assert assessment.depth == Layer.FACT
+    assert assessment.needs_follow_up is False
+    assert assessment.parse_failed is True

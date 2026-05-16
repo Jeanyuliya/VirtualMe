@@ -1,3 +1,5 @@
+import json
+
 import aiosqlite
 from pydantic import SecretStr
 
@@ -18,8 +20,15 @@ class _Messages:
 
     async def create(self, **kwargs):
         max_tokens = kwargs["max_tokens"]
-        if max_tokens == 10:
-            text = "principle"
+        if max_tokens == 120:
+            text = json.dumps(
+                {
+                    "kind": "SUFFICIENT",
+                    "depth": "principle",
+                    "needs_follow_up": False,
+                    "confidence": 0.9,
+                }
+            )
         elif max_tokens == 500:
             text = "[]"
         elif max_tokens == 150:
