@@ -185,3 +185,210 @@ The first draft pack is `engineer_ai_builder` in
 `src/virtualme/data/domain-packs-v2.yaml`. Remaining packs should be added only
 when Scout output includes complete questions, roleplay scenarios, bad-question
 alternatives, and persona anchor examples.
+
+## Next Implementation Plan
+
+This is the proposed next sequence. The intent is to avoid breaking the current
+LINE bot while making v2 concrete enough to dogfood.
+
+### Phase 1: Preserve And Normalize Research Data
+
+Status: partially done.
+
+Inputs already saved:
+
+- `src/virtualme/data/question-pool-v2.yaml`
+- `src/virtualme/data/domain-packs-v2.yaml`
+- `docs/research/virtualme-domain-pack-8-fields.md`
+
+Remaining work:
+
+1. Convert the complete Perplexity 8-field domain pack into
+   `domain-packs-v2.yaml`.
+2. Keep SuperGrok's `engineer_ai_builder` pack as either:
+   - an additional source variant, or
+   - merged into the Perplexity engineer pack with source notes.
+3. Do not hand-convert loosely. Use a script or a reviewable structured edit so
+   the 8 domains keep all sections:
+   - `domain_role`
+   - `core_task`
+   - `primary_counterparty`
+   - `decision_partner`
+   - SKILL questions
+   - PEOPLE questions
+   - VOICE roleplay scenarios
+   - BOUNDARIES questions
+   - bad-question alternatives
+   - persona anchor examples
+4. Add YAML parse tests and content checks:
+   - all 8 domain packs exist
+   - each has 8 SKILL questions
+   - each has 5 PEOPLE questions
+   - each has 5 VOICE roleplays
+   - each has 5 BOUNDARIES questions
+   - each has at least 10 persona anchor examples
+   - no placeholder such as `{decision_partner}` leaks to user-facing text
+
+Acceptance criteria:
+
+- `ruff check src tests` passes.
+- tests prove both `question-pool-v2.yaml` and `domain-packs-v2.yaml` parse.
+- production selector still uses the old pool unless a feature flag is enabled.
+
+### Phase 2: Add V2 Data Models And Loader
+
+Add typed models for v2 data without changing the runtime interview flow.
+
+Suggested files:
+
+- `src/virtualme/interview/v2_schema.py`
+- `src/virtualme/interview/v2_loader.py`
+- `tests/unit/test_interview_v2_loader.py`
+
+Models should include:
+
+- `V2Question`
+- `V2DimensionConfig`
+- `V2QuestionPool`
+- `DomainPack`
+- `DomainPackQuestion`
+- `VoiceRoleplay`
+- `BadQuestionAlternative`
+
+Loader responsibilities:
+
+- parse `question-pool-v2.yaml`
+- parse `domain-packs-v2.yaml`
+- validate required metadata
+- merge domain pack overlays into the generic v2 pool for SKILL / PEOPLE /
+  VOICE / BOUNDARIES
+- keep user-facing text placeholder-free
+
+Acceptance criteria:
+
+- loader can load generic v2 only
+- loader can load generic v2 + `engineer_ai_builder`
+- loaded questions retain `purpose`, `user_explain`, `expected_anchor`,
+  `follow_up_max`, `stop_condition`, and `risk_level`
+- no production route imports v2 loader yet
+
+### Phase 3: Intake Calibration
+
+Before v2 persona extraction starts, the bot must collect domain context.
+
+Required captured fields:
+
+- `domain_role`
+- `core_task`
+- `primary_counterparty`
+- `decision_partner`
+- `virtualme_use_case`
+
+Storage options:
+
+- short term: add columns or JSON notes to `subjects`
+- cleaner long term: new `subject_profile` / `subject_context` table
+
+Decision needed before implementation:
+
+- whether v2 intake is stored as structured columns, JSON, or anchors.
+
+Recommended first implementation:
+
+- store a JSON object in a new table keyed by `interviewee_id`
+- do not count intake toward persona completeness
+- let the user update it later with a command like `更新我的領域`
+
+Acceptance criteria:
+
+- a fresh v2 run asks intake before STATE
+- if intake is already complete, the bot skips intake and starts STATE
+- status reply can show the captured domain context
+
+### Phase 4: V2 Selector Behind Feature Flag
+
+Add a feature flag such as:
+
+```env
+VIRTUALME_INTERVIEW_ENGINE=v1|v2
+```
+
+V2 selector rules:
+
+- stay within a dimension until it reaches its threshold
+- avoid repeated purpose or repeated wording
+- avoid two high-risk questions in a row
+- respect `follow_up_max`
+- after 3-4 questions, offer control and progress
+- when a dimension completes, give a short recap and transition
+- if the user asks "why", answer with `user_explain`
+- if the user says "not me", mark that area for correction instead of arguing
+
+Acceptance criteria:
+
+- v1 remains the default
+- v2 can be enabled locally by env var
+- no existing v1 tests regress
+- v2 has targeted tests for:
+  - first question is intake
+  - domain context changes SKILL / PEOPLE / VOICE / BOUNDARIES wording
+  - high-risk questions are not consecutive
+  - repeated questions are avoided
+
+### Phase 5: Conversation Experience Layer
+
+Implement the parts that reduce boredom and increase ownership.
+
+Required behaviors:
+
+- answer after each user turn with a tiny recap before asking the next question
+- explain the purpose when useful, but do not over-explain every turn
+- show progress in coarse language
+- provide control every 3-4 questions
+- ask "does this sound like you?" after dimension recaps
+- support correction commands:
+  - `這不像我`
+  - `你問這幹嘛`
+  - `剛剛不是講過了`
+  - `跳過`
+  - `今天先到這`
+
+Acceptance criteria:
+
+- transcript no longer feels like a questionnaire
+- bot can state current dimension, purpose, and approximate progress
+- bot stops probing when the user becomes defensive or gives two short answers
+- dimension recap produces 2-4 candidate persona anchors, not a long summary
+
+### Phase 6: Dogfood And Switch
+
+Dogfood sequence:
+
+1. Run v2 locally or on a staging flag for one clean interview.
+2. Ask status every few turns and verify:
+   - current dimension is correct
+   - progress is plausible
+   - purpose answer is clear
+   - no placeholder leaks
+3. Export persona anchors and manually inspect:
+   - are anchors specific enough?
+   - can a responder use them?
+   - are there contradictions or generic labels?
+4. Only then enable v2 on the VPS bot.
+
+Production switch criteria:
+
+- v2 produces better persona anchors than v1 from the same amount of user effort
+- the user can explain why the bot is asking each question
+- the user does not feel trapped in endless probing
+- the bot can recover from correction without becoming defensive
+
+## Explicit Non-Goals For The Next Pass
+
+- Do not replace production immediately.
+- Do not add a web UI.
+- Do not implement LINE quick replies before text commands work.
+- Do not generate synthetic persona summaries until anchors are good.
+- Do not add all possible professions as separate full question pools.
+- Do not let domain packs override SOUL / HISTORY / JOURNAL / STATE unless a
+  real dogfood transcript proves the generic questions fail.
