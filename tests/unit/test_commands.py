@@ -80,3 +80,51 @@ async def test_process_turn_retalk_pins_dimension_question(tmp_path):
     assert "語氣" in reply
     assert "Voice question here" in reply
     assert await db.get_current_question_id(1) == "QV"
+
+
+class _Content:
+    def __init__(self, text: str):
+        self.text = text
+
+
+class _Messages:
+    async def create(self, **kwargs):
+        max_tokens = kwargs["max_tokens"]
+        if max_tokens == 10:
+            text = "principle"
+        elif max_tokens in (500, 900):
+            text = "[]"
+        else:
+            text = "OK"
+        return type("Response", (), {"content": [_Content(text)]})
+
+
+class _Claude:
+    def __init__(self):
+        self.messages = _Messages()
+
+
+async def test_retalk_then_normal_answer_runs_without_error(tmp_path):
+    # Regression: a normal interview answer right after a re-talk command must
+    # not break. (Codex review BW7-12 alleged a SQLite syntax error here; this
+    # test exercises that exact path and confirms it does not occur.)
+    db = await _new_db(tmp_path)
+    selector = QuestionSelector(
+        {
+            1: [Question(id="Q1", week=1, dimension=Dimension.STATE, text="State question")],
+            2: [Question(id="QV", week=2, dimension=Dimension.VOICE, text="Voice question here")],
+        }
+    )
+    settings = Settings(anthropic_api_key=SecretStr("k"))
+    claude = _Claude()
+
+    retalk_reply = await process_turn("u1", "重談 語氣", claude, db, selector, settings)
+    assert await db.get_current_question_id(1) == "QV"  # re-talk pinned VOICE
+
+    # The next normal answer must process cleanly (no SQLite error) — it is
+    # answered against the pinned QV before the selector advances.
+    reply = await process_turn("u1", "我說話通常很直接不拐彎", claude, db, selector, settings)
+
+    assert retalk_reply and reply
+    turns = await db.load_session_turns(1)
+    assert len(turns) >= 4  # retalk pair + normal answer pair
