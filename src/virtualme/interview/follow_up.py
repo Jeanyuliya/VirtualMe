@@ -2,7 +2,7 @@ from enum import StrEnum
 
 from anthropic import AsyncAnthropic
 
-from virtualme.interview.lang import length_units, tokens
+from virtualme.interview.lang import INTERVIEW_OUTPUT_LANGUAGE, length_units, tokens
 from virtualme.interview.models import MODEL_STANDARD
 from virtualme.storage.db import Anchor, Layer
 
@@ -56,11 +56,12 @@ async def generate_follow_up(
     rule: FollowUpRule, answer: str, original_question: str, claude: AsyncAnthropic
 ) -> str:
     if rule == FollowUpRule.R5_REPEAT_TO_TRIANGULATE:
-        return "I think we have this principle clearly enough. Let me ask from another angle."
+        return "這個原則我想我們已經談得夠清楚了。讓我換個角度問。"
     prompt = f"""
 Generate one short therapist-style follow-up question for rule {rule.value}.
 Original question: {original_question}
 Answer: {answer}
+{INTERVIEW_OUTPUT_LANGUAGE}
 Keep their wording. Do not advise, praise, or explain.
 """
     response = await claude.messages.create(

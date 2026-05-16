@@ -17,6 +17,7 @@ from virtualme.interview.commands import (
 )
 from virtualme.interview.depth_evaluator import evaluate_depth
 from virtualme.interview.follow_up import generate_follow_up, select_rule
+from virtualme.interview.lang import INTERVIEW_OUTPUT_LANGUAGE
 from virtualme.interview.models import MODEL_DEEP
 from virtualme.interview.pii import scrub_pii
 from virtualme.interview.question_selector import QuestionSelector
@@ -276,7 +277,9 @@ async def _final_reply(
     gaps = await db.compute_coverage_gap(interviewee_id)
     system = f"""
 You are the interview assistant for {interviewee_id}. Ask one question at a time.
-Do not advise, praise, or paraphrase. Preserve exact wording.
+{INTERVIEW_OUTPUT_LANGUAGE}
+Translate the source question into natural Traditional Chinese, preserving its
+exact meaning, depth, and directness. Do not advise, praise, soften, or add commentary.
 Accumulated anchors: {anchors}
 Coverage gaps: {gaps}
 """

@@ -12,6 +12,17 @@ from __future__ import annotations
 
 import re
 
+# System-prompt directive injected into every interviewer-facing LLM call.
+# The question pool ships in English; the bot translates at phrasing time.
+# Naming "Traditional Chinese, Taiwan" explicitly also blocks the
+# Simplified-Chinese drift seen when the model is merely told to "use Chinese".
+INTERVIEW_OUTPUT_LANGUAGE = (
+    "All output shown to the interviewee MUST be written in Traditional "
+    "Chinese as used in Taiwan (繁體中文, 台灣用語). Never use Simplified "
+    "Chinese characters. Never reply in English, regardless of the language "
+    "the source question or rule text is written in."
+)
+
 CJK_RE = re.compile(r"[一-鿿぀-ヿ가-힯]+")
 LATIN_RE = re.compile(r"[a-z0-9_]+")
 
