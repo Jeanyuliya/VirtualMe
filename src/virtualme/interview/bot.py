@@ -394,20 +394,33 @@ async def _handle_light_greeting(
         await db.set_current_question_id(session.id, question.id)
         await db.record_question_asked(interviewee_id, question.id, session.week)
 
+    anchors = await db.load_anchors_summary(interviewee_id)
+    completeness = score_completeness(anchors)
+    progress_prefix = _progress_resume_prefix(completeness.total_score)
     last_asked = await db.get_last_assistant_content(session.id)
     if last_asked:
         reply = (
-            f"嗨, 我們目前在【{DIMENSION_LABELS[question.dimension]}】這一塊。\n"
+            f"{progress_prefix}\n"
+            f"我們目前在【{DIMENSION_LABELS[question.dimension]}】這一塊。\n"
             f"剛才問的是:\n{last_asked}"
         )
     else:
         rendered_question = await _final_reply(interviewee_id, question, active_client, db)
         reply = (
-            f"嗨, 我們從【{DIMENSION_LABELS[question.dimension]}】開始。\n"
+            f"{progress_prefix}\n"
+            f"我們從【{DIMENSION_LABELS[question.dimension]}】開始。\n"
             f"{rendered_question}"
         )
     await db.save_turn(session.id, "assistant", reply)
     return reply
+
+
+def _progress_resume_prefix(total_score: float) -> str:
+    if total_score >= 85:
+        return "嗨, 你已經快完成了, 我們再收一點關鍵細節就好。"
+    if total_score >= 45:
+        return "嗨, 我們已經完成一大段了。你現在方便繼續嗎?"
+    return "嗨, 我們才剛開始, 我會慢慢來, 一次只問一題。"
 
 
 async def _auto_export_if_sufficient(
