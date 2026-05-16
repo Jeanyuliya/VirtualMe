@@ -181,10 +181,21 @@ specialize the dimensions where professional context matters most:
 - VOICE
 - BOUNDARIES
 
-The first draft pack is `engineer_ai_builder` in
-`src/virtualme/data/domain-packs-v2.yaml`. Remaining packs should be added only
-when Scout output includes complete questions, roleplay scenarios, bad-question
-alternatives, and persona anchor examples.
+The current draft packs are in `src/virtualme/data/domain-packs-v2.yaml`.
+All 8 Perplexity domain packs have been normalized into structured YAML:
+
+- `engineer_ai_builder`
+- `sales_bd`
+- `pm_tpm`
+- `consultant`
+- `manager_people_lead`
+- `creator_writer`
+- `teacher_coach`
+- `founder_operator`
+
+Each pack includes domain metadata, 8 SKILL questions, 5 PEOPLE questions,
+5 VOICE roleplays, 5 BOUNDARIES questions, 5 bad-question alternatives, and
+12 persona anchor examples.
 
 ## Next Implementation Plan
 
@@ -193,7 +204,7 @@ LINE bot while making v2 concrete enough to dogfood.
 
 ### Phase 1: Preserve And Normalize Research Data
 
-Status: partially done.
+Status: done for the first structured draft.
 
 Inputs already saved:
 
@@ -201,31 +212,19 @@ Inputs already saved:
 - `src/virtualme/data/domain-packs-v2.yaml`
 - `docs/research/virtualme-domain-pack-8-fields.md`
 
-Remaining work:
+Completed work:
 
-1. Convert the complete Perplexity 8-field domain pack into
+1. Converted the complete Perplexity 8-field domain pack into
    `domain-packs-v2.yaml`.
-2. Keep SuperGrok's `engineer_ai_builder` pack as either:
-   - an additional source variant, or
-   - merged into the Perplexity engineer pack with source notes.
-3. Do not hand-convert loosely. Use a script or a reviewable structured edit so
-   the 8 domains keep all sections:
-   - `domain_role`
-   - `core_task`
-   - `primary_counterparty`
-   - `decision_partner`
-   - SKILL questions
-   - PEOPLE questions
-   - VOICE roleplay scenarios
-   - BOUNDARIES questions
-   - bad-question alternatives
-   - persona anchor examples
-4. Add YAML parse tests and content checks:
+2. Preserved the raw Perplexity source in
+   `docs/research/virtualme-domain-pack-8-fields.md`.
+3. Added YAML parse tests and content checks:
    - all 8 domain packs exist
    - each has 8 SKILL questions
    - each has 5 PEOPLE questions
    - each has 5 VOICE roleplays
    - each has 5 BOUNDARIES questions
+   - each has 5 bad-question alternatives
    - each has at least 10 persona anchor examples
    - no placeholder such as `{decision_partner}` leaks to user-facing text
 
