@@ -177,18 +177,22 @@ async def process_turn(
             rule, scrub_result.scrubbed_text, current_question.text, active_client
         )
     else:
+        excluded = {current_question.id} if probe_count >= MAX_PROBES_PER_QUESTION else set()
         next_question = selector.select_next(
             session,
             scrub_result.scrubbed_text,
             anchors_by_dimension,
             energy=5,
             asked_question_ids=asked_question_ids,
+            excluded_question_ids=excluded,
             adaptive=settings.adaptive_extraction,
         )
         if next_question is not None:
             await db.set_current_question_id(session.id, next_question.id)
             await db.record_question_asked(interviewee_id, next_question.id, session.week)
-        if settings.use_ppa:
+        if next_question is not None:
+            reply = await _final_reply(interviewee_id, next_question, active_client, db)
+        elif settings.use_ppa:
             from virtualme.interview.ppa import ppa_response
             from virtualme.interview.reinjection import build_reinjection_anchor, should_reinject
 
@@ -199,9 +203,7 @@ async def process_turn(
                 dialogue_context = f"{anchor}\n\n{dialogue_context}" if anchor else dialogue_context
             reply = await ppa_response(dialogue_context, triples, active_client, settings)
         else:
-            reply = await _final_reply(
-                interviewee_id, next_question or DEFAULT_QUESTION, active_client, db
-            )
+            reply = await _final_reply(interviewee_id, DEFAULT_QUESTION, active_client, db)
 
     await db.save_turn(session.id, "assistant", reply)
     turns_so_far = await db.load_session_turns(session.id)

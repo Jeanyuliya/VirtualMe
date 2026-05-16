@@ -7,7 +7,7 @@ from typing import Any
 
 import yaml
 
-from virtualme.storage.db import Anchor, Dimension, Layer, Question, Session
+from virtualme.storage.db import Anchor, Dimension, Question, Session
 
 
 class QuestionSelector:
@@ -21,32 +21,33 @@ class QuestionSelector:
         accumulated_anchors: dict[Dimension, list[Anchor]],
         energy: int,
         asked_question_ids: set[str] | None = None,
+        excluded_question_ids: set[str] | None = None,
         adaptive: bool = False,
     ) -> Question | None:
         asked = asked_question_ids or set()
-        if _has_unexplored_layer(accumulated_anchors):
-            return None
+        excluded = excluded_question_ids or set()
         questions = _flatten(self.question_pool) if adaptive else (
             self.question_pool.get(session.week) or _flatten(self.question_pool)
         )
+        candidates = [question for question in questions if question.id not in excluded] or questions
         if not questions:
             return None
         if energy < 3:
-            light = [q for q in questions if q.energy_tax == "low"]
+            light = [q for q in candidates if q.energy_tax == "low"]
             return _prefer_dimension(light or questions, Dimension.STATE, asked)
         if last_answer:
             neighbor = _neighbor_dimension(last_answer)
             if neighbor:
-                match = _prefer_dimension(questions, neighbor, asked)
+                match = _prefer_dimension(candidates, neighbor, asked)
                 if match:
                     return match
         if random.random() < 0.1:
-            state = _prefer_dimension(questions, Dimension.STATE, asked)
+            state = _prefer_dimension(candidates, Dimension.STATE, asked)
             if state:
                 return state
-        target = _biggest_gap(accumulated_anchors, questions)
-        fallback = next((question for question in questions if question.id not in asked), questions[0])
-        return _prefer_dimension(questions, target, asked) or fallback
+        target = _biggest_gap(accumulated_anchors, candidates)
+        fallback = next((question for question in candidates if question.id not in asked), candidates[0])
+        return _prefer_dimension(candidates, target, asked) or fallback
 
 
 def default_question_pool_path() -> Path:
@@ -72,14 +73,6 @@ def _question_items(raw: Any) -> list[dict[str, Any]]:
         if isinstance(questions, list):
             return questions
     raise ValueError("question pool YAML must be a list or contain a questions list")
-
-
-def _has_unexplored_layer(anchors: dict[Dimension, list[Anchor]]) -> bool:
-    for items in anchors.values():
-        layers = {anchor.layer for anchor in items}
-        if items and Layer.PRINCIPLE not in layers:
-            return True
-    return False
 
 
 def _flatten(pool: dict[int, list[Question]]) -> list[Question]:

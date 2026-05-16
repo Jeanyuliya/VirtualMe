@@ -5,6 +5,7 @@ from pydantic import SecretStr
 
 from virtualme.config import Settings
 from virtualme.interview.bot import process_turn
+from virtualme.interview.question_selector import QuestionSelector
 from virtualme.storage.db import DB, Dimension, Question
 
 
@@ -17,6 +18,7 @@ class _Messages:
     def __init__(self, depth: str = "principle"):
         self.depth = depth
         self.depth_questions: list[str] = []
+        self.ppa_calls = 0
 
     async def create(self, **kwargs):
         max_tokens = kwargs["max_tokens"]
@@ -47,6 +49,9 @@ class _Messages:
             text = "Could you give me one concrete example?"
         elif max_tokens == 180:
             text = prompt.split("Ask this next: ", 1)[1]
+        elif max_tokens == 150:
+            self.ppa_calls += 1
+            text = '{"assistant": "freeform ppa reply"}'
         else:
             text = "OK"
         return type("Response", (), {"content": [_Content(text)]})
@@ -172,3 +177,54 @@ async def test_selector_none_does_not_persist_default_question(tmp_path):
     await process_turn("u1", "Answer while selector returns none.", claude, db, selector, settings)
 
     assert await _session_current_question_id(db, session.id) == "Q2"
+
+
+async def test_probe_budget_forces_advance_to_next_question(tmp_path):
+    db = DB(str(tmp_path / "virtualme.db"))
+    await db.init()
+    settings = Settings(anthropic_api_key=SecretStr("test"), use_ppa=False)
+    selector = QuestionSelector(
+        {
+            1: [
+                Question(
+                    id="Q1",
+                    week=1,
+                    dimension=Dimension.STATE,
+                    text="How has work been?",
+                ),
+                Question(
+                    id="Q2",
+                    week=1,
+                    dimension=Dimension.SKILL,
+                    text="What skill matters most?",
+                ),
+            ]
+        }
+    )
+    claude = _Claude(depth="fact")
+
+    await process_turn("u1", "First thin answer.", claude, db, selector, settings)
+    await process_turn("u1", "Second thin answer.", claude, db, selector, settings)
+    reply = await process_turn("u1", "Third thin answer.", claude, db, selector, settings)
+
+    assert reply == "What skill matters most?"
+    assert await _session_current_question_id(db, 1) == "Q2"
+
+
+async def test_ppa_does_not_override_explicit_next_question(tmp_path):
+    db = DB(str(tmp_path / "virtualme.db"))
+    await db.init()
+    settings = Settings(anthropic_api_key=SecretStr("test"), use_ppa=True)
+    q2 = Question(
+        id="Q2",
+        week=1,
+        dimension=Dimension.SKILL,
+        text="What skill matters most?",
+    )
+    selector = _FixedSelector(q2)
+    claude = _Claude()
+
+    reply = await process_turn("u1", "Sufficient answer.", claude, db, selector, settings)
+
+    assert reply == "What skill matters most?"
+    assert claude.messages.ppa_calls == 0

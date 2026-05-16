@@ -20,8 +20,10 @@ def _session_for_week(week: int) -> Session:
     return Session(id=1, interviewee_id="u1", week=week)
 
 
-def test_returns_none_when_unexplored_layer_exists():
-    selector = QuestionSelector({1: [_question("H1", Dimension.HISTORY)]})
+def test_unexplored_layer_does_not_block_topic_progression():
+    selector = QuestionSelector(
+        {1: [_question("H1", Dimension.HISTORY), _question("S1", Dimension.SKILL)]}
+    )
     anchors = {
         Dimension.HISTORY: [
             Anchor(
@@ -32,7 +34,23 @@ def test_returns_none_when_unexplored_layer_exists():
             )
         ]
     }
-    assert selector.select_next(_session(), None, anchors, energy=5) is None
+    assert selector.select_next(_session(), None, anchors, energy=5).id == "S1"
+
+
+def test_can_exclude_current_question_when_probe_budget_is_spent():
+    selector = QuestionSelector(
+        {1: [_question("H1", Dimension.HISTORY), _question("S1", Dimension.SKILL)]}
+    )
+
+    selected = selector.select_next(
+        _session(),
+        None,
+        {},
+        energy=5,
+        excluded_question_ids={"H1"},
+    )
+
+    assert selected.id == "S1"
 
 
 def test_picks_biggest_gap_dimension():
