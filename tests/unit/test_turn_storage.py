@@ -26,3 +26,16 @@ async def test_get_last_assistant_content_returns_latest_assistant_turn(tmp_path
     await db.save_turn(session.id, "assistant", "可以給我一個例子嗎？")  # noqa: RUF001
 
     assert await db.get_last_assistant_content(session.id) == "可以給我一個例子嗎？"  # noqa: RUF001
+
+
+async def test_transport_event_claim_is_idempotent(tmp_path):
+    db = DB(str(tmp_path / "virtualme.db"))
+    await db.init()
+
+    first = await db.claim_transport_event("evt-1", "line", "u1", "m1")
+    second = await db.claim_transport_event("evt-1", "line", "u1", "m1")
+
+    assert first is True
+    assert second is False
+
+    await db.mark_transport_event_done("evt-1")

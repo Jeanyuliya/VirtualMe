@@ -231,6 +231,21 @@ async def _apply_schema_migrations(conn: aiosqlite.Connection) -> None:
             if "duplicate column" not in str(exc).lower():
                 raise
 
+    await conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS transport_events (
+            event_id TEXT PRIMARY KEY,
+            platform TEXT NOT NULL,
+            interviewee_id TEXT,
+            message_id TEXT,
+            status TEXT NOT NULL DEFAULT 'processing',
+            error TEXT,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+
 
 async def init_db(path: str) -> None:
     """Initialize SQLite DB: pragmas, schema, migrations."""
@@ -491,6 +506,61 @@ class DB:
             await conn.execute(
                 "UPDATE sessions SET current_question_id = ? WHERE id = ?",
                 (question_id, session_id),
+            )
+            await conn.commit()
+
+    async def claim_transport_event(
+        self,
+        event_id: str,
+        platform: str,
+        interviewee_id: str | None = None,
+        message_id: str | None = None,
+    ) -> bool:
+        """Return True only for the first delivery of a transport event.
+
+        LINE retries webhooks when the HTTP response is not fast enough. The
+        event/message id belongs at the transport boundary, not in turn storage,
+        so duplicate deliveries are claimed here before any interview state is
+        mutated.
+        """
+        async with self._connect() as conn:
+            cur = await conn.execute(
+                """
+                INSERT OR IGNORE INTO transport_events(
+                    event_id, platform, interviewee_id, message_id
+                )
+                VALUES (?, ?, ?, ?)
+                """,
+                (event_id, platform, interviewee_id, message_id),
+            )
+            await conn.commit()
+        return cur.rowcount == 1
+
+    async def mark_transport_event_done(self, event_id: str) -> None:
+        async with self._connect() as conn:
+            await conn.execute(
+                """
+                UPDATE transport_events
+                SET status = 'done',
+                    error = NULL,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE event_id = ?
+                """,
+                (event_id,),
+            )
+            await conn.commit()
+
+    async def mark_transport_event_failed(self, event_id: str, error: str) -> None:
+        async with self._connect() as conn:
+            await conn.execute(
+                """
+                UPDATE transport_events
+                SET status = 'failed',
+                    error = ?,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE event_id = ?
+                """,
+                (error[:500], event_id),
             )
             await conn.commit()
 

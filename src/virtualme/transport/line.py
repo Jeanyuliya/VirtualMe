@@ -1,8 +1,10 @@
+import asyncio
 import logging
+from collections.abc import Awaitable
 from typing import Any
 
 from anthropic import AsyncAnthropic
-from fastapi import Request
+from fastapi import BackgroundTasks, Request
 from linebot.v3 import WebhookParser
 from linebot.v3.exceptions import InvalidSignatureError
 from linebot.v3.messaging import (
@@ -21,6 +23,7 @@ from virtualme.interview.question_selector import QuestionSelector
 from virtualme.storage.db import DB
 
 logger = logging.getLogger(__name__)
+_BACKGROUND_TASKS: set[asyncio.Task[None]] = set()
 
 
 async def handle_line_webhook(
@@ -30,6 +33,7 @@ async def handle_line_webhook(
     selector: QuestionSelector,
     channel_secret: str | None = None,
     settings: Settings | None = None,
+    background_tasks: BackgroundTasks | None = None,
 ) -> dict[str, Any]:
     settings = settings or Settings()
     body = await request.body()
@@ -51,40 +55,89 @@ async def handle_line_webhook(
         logger.warning("LINE webhook rejected due to malformed signature or body: %s", exc)
         return {"status": "invalid_signature"}
 
+    queued = 0
+    duplicate = 0
+    skipped = 0
+    for event in events:
+        if not isinstance(event, MessageEvent):
+            skipped += 1
+            continue
+        if not isinstance(event.message, TextMessageContent):
+            skipped += 1
+            continue
+        if not event.reply_token:
+            logger.warning("LINE text event skipped because reply_token is missing")
+            skipped += 1
+            continue
+
+        interviewee_id = getattr(event.source, "user_id", None)
+        if not interviewee_id:
+            logger.warning("LINE text event skipped because user_id is missing")
+            skipped += 1
+            continue
+
+        event_id = _event_id(event)
+        message_id = getattr(event.message, "id", None)
+        if not await db.claim_transport_event(
+            event_id,
+            "line",
+            interviewee_id=interviewee_id,
+            message_id=message_id,
+        ):
+            duplicate += 1
+            logger.info("Duplicate LINE event skipped: %s", event_id)
+            continue
+
+        _enqueue(
+            _process_text_event(
+                event_id=event_id,
+                reply_token=event.reply_token,
+                interviewee_id=interviewee_id,
+                incoming_message=event.message.text,
+                access_token=access_token,
+                claude=claude,
+                db=db,
+                selector=selector,
+                settings=settings,
+            ),
+            background_tasks,
+        )
+        queued += 1
+
+    return {"status": "ok", "queued": queued, "duplicate": duplicate, "skipped": skipped}
+
+
+async def _process_text_event(
+    *,
+    event_id: str,
+    reply_token: str,
+    interviewee_id: str,
+    incoming_message: str,
+    access_token: str,
+    claude: AsyncAnthropic,
+    db: DB,
+    selector: QuestionSelector,
+    settings: Settings,
+) -> None:
     configuration = Configuration(access_token=access_token)
-    handled = 0
     async with AsyncApiClient(configuration) as api_client:
         line_bot_api = AsyncMessagingApi(api_client)
-        for event in events:
-            if not isinstance(event, MessageEvent):
-                continue
-            if not isinstance(event.message, TextMessageContent):
-                continue
-            if not event.reply_token:
-                logger.warning("LINE text event skipped because reply_token is missing")
-                continue
-
-            interviewee_id = getattr(event.source, "user_id", None)
-            if not interviewee_id:
-                logger.warning("LINE text event skipped because user_id is missing")
-                continue
-
-            try:
-                reply = await process_turn(
-                    interviewee_id=interviewee_id,
-                    incoming_message=event.message.text,
-                    claude=claude,
-                    db=db,
-                    selector=selector,
-                    settings=settings,
-                )
-            except Exception as exc:
-                logger.error("process_turn failed for %s: %s", interviewee_id, exc)
-                reply = INTERVIEW_ERROR_REPLY
-            if await _send_reply_or_push(line_bot_api, event.reply_token, interviewee_id, reply):
-                handled += 1
-
-    return {"status": "ok", "handled": handled}
+        try:
+            reply = await process_turn(
+                interviewee_id=interviewee_id,
+                incoming_message=incoming_message,
+                claude=claude,
+                db=db,
+                selector=selector,
+                settings=settings,
+            )
+        except Exception as exc:
+            logger.error("process_turn failed for %s: %s", interviewee_id, exc)
+            await db.mark_transport_event_failed(event_id, str(exc))
+            reply = INTERVIEW_ERROR_REPLY
+        else:
+            await db.mark_transport_event_done(event_id)
+        await _send_reply_or_push(line_bot_api, reply_token, interviewee_id, reply)
 
 
 async def _send_reply_or_push(
@@ -119,3 +172,22 @@ async def _send_reply_or_push(
 
 def _secret_value(secret) -> str | None:
     return secret.get_secret_value() if secret is not None else None
+
+
+def _event_id(event: MessageEvent) -> str:
+    webhook_event_id = getattr(event, "webhook_event_id", None)
+    message_id = getattr(event.message, "id", None)
+    return str(webhook_event_id or message_id or f"line:{id(event)}")
+
+
+def _enqueue(coro: Awaitable[None], background_tasks: BackgroundTasks | None) -> None:
+    if background_tasks is not None:
+        background_tasks.add_task(_await_background, coro)
+        return
+    task = asyncio.create_task(coro)
+    _BACKGROUND_TASKS.add(task)
+    task.add_done_callback(_BACKGROUND_TASKS.discard)
+
+
+async def _await_background(coro: Awaitable[None]) -> None:
+    await coro

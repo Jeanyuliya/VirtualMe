@@ -18,6 +18,46 @@ class FakeRequest:
         return self._body
 
 
+class FakeDB:
+    def __init__(self):
+        self.claimed: set[str] = set()
+        self.done: list[str] = []
+        self.failed: list[tuple[str, str]] = []
+
+    async def claim_transport_event(
+        self,
+        event_id: str,
+        platform: str,
+        interviewee_id: str | None = None,
+        message_id: str | None = None,
+    ) -> bool:
+        assert platform == "line"
+        assert interviewee_id == "U123"
+        assert message_id == "m1"
+        if event_id in self.claimed:
+            return False
+        self.claimed.add(event_id)
+        return True
+
+    async def mark_transport_event_done(self, event_id: str) -> None:
+        self.done.append(event_id)
+
+    async def mark_transport_event_failed(self, event_id: str, error: str) -> None:
+        self.failed.append((event_id, error))
+
+
+class FakeBackgroundTasks:
+    def __init__(self):
+        self.tasks = []
+
+    def add_task(self, func, *args, **kwargs):
+        self.tasks.append((func, args, kwargs))
+
+    async def run(self):
+        for func, args, kwargs in self.tasks:
+            await func(*args, **kwargs)
+
+
 def _settings() -> Settings:
     return Settings(
         anthropic_api_key=SecretStr("test"),
@@ -74,6 +114,8 @@ async def test_missing_credentials_returns_clear_error():
 async def test_valid_text_event_calls_process_turn_and_reply(monkeypatch):
     body = _line_body()
     sent = []
+    background = FakeBackgroundTasks()
+    db = FakeDB()
 
     async def fake_process_turn(**kwargs):
         assert kwargs["interviewee_id"] == "U123"
@@ -107,17 +149,22 @@ async def test_valid_text_event_calls_process_turn_and_reply(monkeypatch):
     result = await line.handle_line_webhook(
         FakeRequest(body, _signature(body)),
         object(),
-        object(),
+        db,
         object(),
         settings=_settings(),
+        background_tasks=background,
     )
-    assert result == {"status": "ok", "handled": 1}
+    assert result == {"status": "ok", "queued": 1, "duplicate": 0, "skipped": 0}
+    await background.run()
     assert sent == [("reply", "reply-token", "reply")]
+    assert db.done == ["01FZ74A0TDDPYRVKNK77XKC3ZR"]
 
 
 async def test_process_turn_failure_replies_with_fallback(monkeypatch):
     body = _line_body()
     sent = []
+    background = FakeBackgroundTasks()
+    db = FakeDB()
 
     async def fake_process_turn(**kwargs):
         raise RuntimeError("anthropic outage")
@@ -149,12 +196,15 @@ async def test_process_turn_failure_replies_with_fallback(monkeypatch):
     result = await line.handle_line_webhook(
         FakeRequest(body, _signature(body)),
         object(),
-        object(),
+        db,
         object(),
         settings=_settings(),
+        background_tasks=background,
     )
-    assert result == {"status": "ok", "handled": 1}
+    assert result == {"status": "ok", "queued": 1, "duplicate": 0, "skipped": 0}
+    await background.run()
     assert sent == [("reply", "reply-token", line.INTERVIEW_ERROR_REPLY)]
+    assert db.failed == [("01FZ74A0TDDPYRVKNK77XKC3ZR", "anthropic outage")]
 
 
 async def test_malformed_signature_is_graceful():
@@ -183,7 +233,31 @@ async def test_text_event_without_reply_token_skips(monkeypatch):
         object(),
         settings=_settings(),
     )
-    assert result == {"status": "ok", "handled": 0}
+    assert result == {"status": "ok", "queued": 0, "duplicate": 0, "skipped": 1}
+
+
+async def test_duplicate_line_event_is_not_enqueued(monkeypatch):
+    body = _line_body()
+    background = FakeBackgroundTasks()
+    db = FakeDB()
+    assert await db.claim_transport_event("01FZ74A0TDDPYRVKNK77XKC3ZR", "line", "U123", "m1")
+
+    async def fake_process_turn(**kwargs):
+        raise AssertionError("duplicate event should not be processed")
+
+    monkeypatch.setattr(line, "process_turn", fake_process_turn)
+
+    result = await line.handle_line_webhook(
+        FakeRequest(body, _signature(body)),
+        object(),
+        db,
+        object(),
+        settings=_settings(),
+        background_tasks=background,
+    )
+
+    assert result == {"status": "ok", "queued": 0, "duplicate": 1, "skipped": 0}
+    assert background.tasks == []
 
 
 async def test_reply_failure_uses_push_fallback():

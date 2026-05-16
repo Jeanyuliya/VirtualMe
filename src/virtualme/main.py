@@ -2,7 +2,7 @@ import logging
 from contextlib import asynccontextmanager
 
 from anthropic import AsyncAnthropic
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
 
 from virtualme import __version__
 from virtualme.config import Settings, sqlite_path
@@ -42,13 +42,21 @@ async def healthz() -> dict[str, str]:
 
 
 @app.post("/webhook/line")
-async def line_webhook(request: Request) -> dict:
+async def line_webhook(request: Request, background_tasks: BackgroundTasks) -> dict:
     secret = (
         settings.line_channel_secret.get_secret_value()
         if settings.line_channel_secret is not None
         else None
     )
-    result = await handle_line_webhook(request, claude, db, selector, secret, settings)
+    result = await handle_line_webhook(
+        request,
+        claude,
+        db,
+        selector,
+        secret,
+        settings,
+        background_tasks,
+    )
     if result.get("status") == "invalid_signature":
         raise HTTPException(status_code=400, detail="invalid LINE signature")
     if result.get("status") == "missing_line_credentials":

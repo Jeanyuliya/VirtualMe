@@ -103,3 +103,14 @@ CREATE TABLE IF NOT EXISTS checklist_items (
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (interviewee_id, item_key)
 );
+
+CREATE TABLE IF NOT EXISTS transport_events (
+    event_id TEXT PRIMARY KEY,
+    platform TEXT NOT NULL,
+    interviewee_id TEXT,
+    message_id TEXT,
+    status TEXT NOT NULL DEFAULT 'processing',
+    error TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
