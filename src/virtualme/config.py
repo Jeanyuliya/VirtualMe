@@ -8,6 +8,10 @@ class Settings(BaseSettings):
     anthropic_api_key: SecretStr
     line_channel_access_token: SecretStr | None = None
     line_channel_secret: SecretStr | None = None
+    responder_line_channel_access_token: SecretStr | None = None
+    responder_line_channel_secret: SecretStr | None = None
+    persona_archive_dir: str | None = None
+    owner_line_user_id: str | None = None
     database_url: str = "sqlite:///./data/virtualme.db"
     session_max_minutes: int = 25
     energy_low_threshold: int = 3
