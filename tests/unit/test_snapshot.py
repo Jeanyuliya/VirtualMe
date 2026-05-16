@@ -120,6 +120,42 @@ async def test_mini_blind_test_and_feedback_routing_reference_hypotheses(tmp_pat
     assert "Ask what evidence makes them increase or reduce trust." in routing
 
 
+async def test_mini_blind_test_varies_skill_scenarios_by_evidence(tmp_path):
+    db = await _new_db(tmp_path)
+    await db.save_anchor(
+        "u1",
+        Dimension.SKILL,
+        Layer.PATTERN,
+        "uses project triangle language around budget scope and schedule",
+        [1],
+        ["Q1"],
+    )
+    await db.save_anchor(
+        "u1",
+        Dimension.SKILL,
+        Layer.PRINCIPLE,
+        "treats handoff quality as proof of real commitment",
+        [2],
+        ["Q2"],
+    )
+    await db.save_anchor(
+        "u1",
+        Dimension.SKILL,
+        Layer.PRINCIPLE,
+        "spots emotional blackmail during pricing negotiation",
+        [3],
+        ["Q3"],
+    )
+
+    bundle = await build_snapshot_bundle(db, "u1")
+    scenarios = [item.scenario for item in bundle.mini_blind_test]
+
+    assert any("cutting budget" in scenario for scenario in scenarios)
+    assert any("handoff is vague" in scenario for scenario in scenarios)
+    assert any("discount request as friendship" in scenario for scenario in scenarios)
+    assert len(set(scenarios)) == len(scenarios)
+
+
 async def test_snapshot_rescrubs_pii(tmp_path):
     db = await _new_db(tmp_path)
     await db.save_anchor(

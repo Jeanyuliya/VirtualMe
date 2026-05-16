@@ -274,7 +274,9 @@ def _top_level_sketch(bundle: SnapshotBundle) -> list[str]:
     if not bundle.hypotheses:
         return ["_No sketch yet._"]
 
-    by_dimension = {item.dimension: item for item in bundle.hypotheses}
+    by_dimension: dict[Dimension, SoulLiteHypothesis] = {}
+    for item in bundle.hypotheses:
+        by_dimension.setdefault(item.dimension, item)
     lines = [
         f"- Core decision default: {_sketch_phrase(by_dimension.get(Dimension.SOUL))}",
         f"- Boundary / refusal pattern: {_sketch_phrase(by_dimension.get(Dimension.BOUNDARIES))}",
@@ -477,10 +479,7 @@ def _suggested_follow_up(candidate: _Candidate) -> str:
 def _scenario_for(hypothesis: SoulLiteHypothesis) -> str:
     evidence = _strip_hypothesis_prefix(hypothesis.hypothesis)
     scenarios = {
-        Dimension.SOUL: (
-            "A collaborator asks you to choose between preserving harmony and acting on "
-            f"`{evidence}`. Write what you would decide and what you would say."
-        ),
+        Dimension.SOUL: _soul_scenario(evidence),
         Dimension.BOUNDARIES: (
             "A trusted person asks for an urgent exception that conflicts with "
             f"`{evidence}`. Write the refusal, compromise, or exception rule."
@@ -489,10 +488,7 @@ def _scenario_for(hypothesis: SoulLiteHypothesis) -> str:
             "You need to send a short LINE message in a tense situation where "
             f"`{evidence}` matters. Write the exact message."
         ),
-        Dimension.SKILL: (
-            "A project is behind schedule and the first plan is failing. Use "
-            f"`{evidence}` to decide the next action and explain it to the team."
-        ),
+        Dimension.SKILL: _skill_scenario(evidence),
         Dimension.PEOPLE: (
             "A partner's reliability is uncertain and you must decide how much trust or "
             f"visibility to give them, given `{evidence}`."
@@ -501,6 +497,53 @@ def _scenario_for(hypothesis: SoulLiteHypothesis) -> str:
     return scenarios.get(
         hypothesis.dimension,
         f"A realistic situation tests whether `{evidence}` changes what you would say or choose.",
+    )
+
+
+def _soul_scenario(evidence: str) -> str:
+    if _contains_any(evidence, ("陷害", "人性", "目的")):
+        return (
+            "A teammate may have undermined you, but the motive is unclear. Decide whether "
+            f"to keep investigating, confront them, or move on, given `{evidence}`."
+        )
+    if _contains_any(evidence, ("收入", "工作本質", "意義", "職業")):
+        return (
+            "A higher-paying opportunity appears, but it changes the nature of your work. "
+            f"Write how `{evidence}` affects the decision."
+        )
+    if _contains_any(evidence, ("電腦", "職業路徑", "可能性")):
+        return (
+            "Someone suggests a serious non-computer career path. Write your first reaction "
+            f"and decision criteria, given `{evidence}`."
+        )
+    return (
+        "A collaborator asks you to choose between preserving harmony and acting on "
+        f"`{evidence}`. Write what you would decide and what you would say."
+    )
+
+
+def _skill_scenario(evidence: str) -> str:
+    if _contains_any(
+        evidence,
+        ("鐵三角", "時程", "範疇", "預算", "不合理", "triangle", "budget", "scope", "schedule"),
+    ):
+        return (
+            "A client wants the same scope and deadline after cutting budget. Use "
+            f"`{evidence}` to decide what to push back on and how to explain it."
+        )
+    if _contains_any(evidence, ("交接班", "交接", "投入", "handoff", "commitment")):
+        return (
+            "A handoff is vague before a critical shift, and the person says they are already "
+            f"done. Use `{evidence}` to decide whether to accept it or intervene."
+        )
+    if _contains_any(evidence, ("情感勒索", "議價", "報價", "blackmail", "pricing", "negotiation")):
+        return (
+            "A buyer frames a discount request as friendship, loyalty, or helping them out. "
+            f"Use `{evidence}` to decide your pricing response."
+        )
+    return (
+        "A project is behind schedule and the first plan is failing. Use "
+        f"`{evidence}` to decide the next action and explain it to the team."
     )
 
 
@@ -572,6 +615,11 @@ def _dimension_for_triple(triple: PersonaTriple) -> Dimension:
 def _has_decision_signal(text: str) -> bool:
     lowered = text.lower()
     return any(keyword in lowered for keyword in DECISION_KEYWORDS)
+
+
+def _contains_any(text: str, keywords: tuple[str, ...]) -> bool:
+    lowered = text.lower()
+    return any(keyword in lowered for keyword in keywords)
 
 
 def _clean(text: str) -> str:
