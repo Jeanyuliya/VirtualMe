@@ -36,6 +36,25 @@ class Layer(StrEnum):
     PRINCIPLE = "principle"
 
 
+class SubjectDomain(StrEnum):
+    HR_HRBP = "hr-hrbp"
+    SALES = "sales"
+    ENGINEER = "engineer"
+    PM = "pm"
+    TEACHER = "teacher"
+    CONSULTANT = "consultant"
+    OTHER = "other"
+    UNSPECIFIED = "unspecified"
+
+
+class SubjectStatus(StrEnum):
+    EXTRACTING = "extracting"
+    EXTRACTED = "extracted"
+    DEPLOYED = "deployed"
+    EVALUATED = "evaluated"
+    DONE = "done"
+
+
 class Verdict(StrEnum):
     SHIP_READY = "ship-ready"
     NEEDS_WORK = "needs-work"
@@ -82,6 +101,16 @@ class Question(BaseModel):
     text: str
     rationale_probe: str | None = None
     energy_tax: str = "mid"
+
+
+class Subject(BaseModel):
+    interviewee_id: str
+    display_name: str | None = None
+    domain: SubjectDomain = SubjectDomain.UNSPECIFIED
+    goal: str | None = None
+    status: SubjectStatus = SubjectStatus.EXTRACTING
+    created_at: str | None = None
+    updated_at: str | None = None
 
 
 def _schema_path() -> Path:
@@ -196,6 +225,95 @@ class DB:
 
     async def init(self) -> None:
         await init_db(self.path)
+
+    async def get_or_create_subject(
+        self,
+        interviewee_id: str,
+        domain: SubjectDomain = SubjectDomain.UNSPECIFIED,
+        display_name: str | None = None,
+        goal: str | None = None,
+    ) -> Subject:
+        await self.init()
+        async with self._connect() as conn:
+            conn.row_factory = aiosqlite.Row
+            await conn.execute(
+                """
+                INSERT OR IGNORE INTO subjects(
+                    interviewee_id, display_name, domain, goal
+                )
+                VALUES (?, ?, ?, ?)
+                """,
+                (interviewee_id, display_name, domain.value, goal),
+            )
+            await conn.commit()
+            row = await (
+                await conn.execute(
+                    "SELECT * FROM subjects WHERE interviewee_id = ?",
+                    (interviewee_id,),
+                )
+            ).fetchone()
+        return _subject_from_row(row)
+
+    async def get_subject(self, interviewee_id: str) -> Subject | None:
+        await self.init()
+        async with self._connect() as conn:
+            conn.row_factory = aiosqlite.Row
+            row = await (
+                await conn.execute(
+                    "SELECT * FROM subjects WHERE interviewee_id = ?",
+                    (interviewee_id,),
+                )
+            ).fetchone()
+        return _subject_from_row(row) if row else None
+
+    async def update_subject(
+        self,
+        interviewee_id: str,
+        *,
+        domain: SubjectDomain | None = None,
+        goal: str | None = None,
+        display_name: str | None = None,
+        status: SubjectStatus | None = None,
+    ) -> Subject:
+        await self.init()
+        updates: list[str] = []
+        params: list[str] = []
+        if domain is not None:
+            updates.append("domain = ?")
+            params.append(domain.value)
+        if goal is not None:
+            updates.append("goal = ?")
+            params.append(goal)
+        if display_name is not None:
+            updates.append("display_name = ?")
+            params.append(display_name)
+        if status is not None:
+            updates.append("status = ?")
+            params.append(status.value)
+
+        async with self._connect() as conn:
+            conn.row_factory = aiosqlite.Row
+            if updates:
+                params.append(interviewee_id)
+                await conn.execute(
+                    f"""
+                    UPDATE subjects
+                    SET {", ".join(updates)},
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE interviewee_id = ?
+                    """,
+                    params,
+                )
+                await conn.commit()
+            row = await (
+                await conn.execute(
+                    "SELECT * FROM subjects WHERE interviewee_id = ?",
+                    (interviewee_id,),
+                )
+            ).fetchone()
+        if row is None:
+            raise ValueError(f"subject not found: {interviewee_id}")
+        return _subject_from_row(row)
 
     async def get_or_create_session(self, interviewee_id: str, week: int) -> Session:
         await self.init()
@@ -682,6 +800,18 @@ def _anchor_from_row(row: aiosqlite.Row) -> Anchor:
         triangulated=bool(row["triangulated"]),
         source_turn_ids=json.loads(row["source_turn_ids"]),
         source_question_ids=json.loads(source_question_ids_raw),
+    )
+
+
+def _subject_from_row(row: aiosqlite.Row) -> Subject:
+    return Subject(
+        interviewee_id=row["interviewee_id"],
+        display_name=row["display_name"],
+        domain=SubjectDomain(row["domain"]),
+        goal=row["goal"],
+        status=SubjectStatus(row["status"]),
+        created_at=row["created_at"],
+        updated_at=row["updated_at"],
     )
 
 

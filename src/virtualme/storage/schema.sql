@@ -83,3 +83,13 @@ CREATE TABLE IF NOT EXISTS blind_tests (
     recommended_action TEXT,
     ts TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE TABLE IF NOT EXISTS subjects (
+    interviewee_id TEXT PRIMARY KEY,
+    display_name TEXT,
+    domain TEXT NOT NULL DEFAULT 'unspecified',
+    goal TEXT,
+    status TEXT NOT NULL DEFAULT 'extracting',
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT
+);
