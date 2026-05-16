@@ -69,7 +69,7 @@ Stanford / Joon Park et al. ([arXiv:2411.10109](https://arxiv.org/abs/2411.10109
 
 VirtualMe extends this into a production pipeline:
 - Interview spread over 8 weeks × 30 min (≈ 4–6 hours total, well above the 2-hour threshold)
-- Voice samples collected alongside for retrieval-augmented agent responses
+- (roadmap) Voice sample collection + retrieval-augmented agent responses — planned, not yet implemented
 - Two blind-test gates (Week 5, Week 8) catch overfitting before shipping
 
 ## What you get after 8 weeks

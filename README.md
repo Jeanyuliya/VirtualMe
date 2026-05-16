@@ -69,7 +69,7 @@ Stanford / Joon Park et al. ([arXiv:2411.10109](https://arxiv.org/abs/2411.10109
 
 VirtualMe 把這個發現延伸成可上線的 pipeline：
 - 訪談分散到 8 週 × 30 分鐘（總共 4–6 小時，遠超 2 小時門檻）
-- 同步蒐集語音樣本給 retrieval-augmented 代言用
+- （roadmap）語音樣本蒐集 + retrieval-augmented 代言 —— 規劃中，目前未實作
 - Week 5 / Week 8 兩次盲評 gate 擋過擬合
 
 ## 8 週後你會拿到什麼

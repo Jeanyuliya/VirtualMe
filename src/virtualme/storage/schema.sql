@@ -17,7 +17,6 @@ CREATE TABLE IF NOT EXISTS turns (
     role TEXT NOT NULL,
     content TEXT NOT NULL,
     content_hash TEXT NOT NULL UNIQUE,
-    voice_audio_path TEXT,
     ts TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -46,16 +45,6 @@ CREATE TABLE IF NOT EXISTS anchors (
     source_turn_ids TEXT NOT NULL DEFAULT '[]',
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     pii_tag TEXT
-);
-
-CREATE TABLE IF NOT EXISTS voice_samples (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    interviewee_id TEXT NOT NULL,
-    content TEXT NOT NULL,
-    metadata_json TEXT NOT NULL DEFAULT '{}',
-    embedding BLOB,
-    source_turn_id INTEGER REFERENCES turns(id),
-    pii_scrubbed INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS persona_triples (
