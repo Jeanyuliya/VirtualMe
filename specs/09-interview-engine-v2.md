@@ -23,6 +23,8 @@ This draft combines two scout outputs:
 
 - Perplexity Max: methodology-first question design, 57 core questions,
   anchor type, stop condition, and risk notes.
+- Perplexity Max domain pack: complete 8-field domain supplement archived at
+  `docs/research/virtualme-domain-pack-8-fields.md`.
 - SuperGrok: product experience flow, progress-aware resume language,
   user-control moments, and repair scripts.
 
