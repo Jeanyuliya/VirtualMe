@@ -1,12 +1,12 @@
 import logging
 from contextlib import asynccontextmanager
 
-from anthropic import AsyncAnthropic
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
 
 from virtualme import __version__
 from virtualme.config import Settings, sqlite_path
 from virtualme.interview.question_selector import QuestionSelector, load_question_pool
+from virtualme.llm import build_llm_client
 from virtualme.responder.persona import load_persona
 from virtualme.storage.db import DB
 from virtualme.transport.line import handle_line_webhook
@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 
 settings = Settings()
 db = DB(sqlite_path(settings.database_url))
-claude = AsyncAnthropic(api_key=settings.anthropic_api_key.get_secret_value(), max_retries=4)
+claude = build_llm_client(settings)
 selector = QuestionSelector(load_question_pool())
 try:
     responder_persona = (
