@@ -21,6 +21,15 @@ class _Claude:
         self.messages = _Messages()
 
 
+class _ProviderClient:
+    def __init__(self):
+        self.kwargs = None
+
+    async def create_message(self, **kwargs):
+        self.kwargs = kwargs
+        return "provider-ok"
+
+
 async def test_create_message_strips_temperature_for_unsupported_model():
     claude = _Claude()
     response = await create_message(
@@ -48,3 +57,15 @@ async def test_create_message_preserves_temperature_for_supported_model():
         messages=[{"role": "user", "content": "ping"}],
     )
     assert claude.messages.kwargs["temperature"] == 0.3
+
+
+async def test_create_message_uses_provider_adapter_when_available():
+    client = _ProviderClient()
+    response = await create_message(
+        client,
+        model=MODEL_STANDARD,
+        max_tokens=1,
+        messages=[{"role": "user", "content": "ping"}],
+    )
+    assert response == "provider-ok"
+    assert client.kwargs["model"] == MODEL_STANDARD
