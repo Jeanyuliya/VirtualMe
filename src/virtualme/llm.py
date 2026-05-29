@@ -38,6 +38,12 @@ class GeminiClient:
 
     provider = "gemini"
 
+    _MODEL_MAP = {
+        "claude-haiku-4-5": "gemini-2.5-flash",
+        "claude-sonnet-4-6": "gemini-2.5-pro",
+        "claude-opus-4-7": "gemini-2.5-pro",
+    }
+
     def __init__(self, api_key: str):
         try:
             from google import genai
@@ -58,6 +64,7 @@ class GeminiClient:
         system = kwargs.get("system")
         messages = kwargs.get("messages", [])
         contents = [self._to_gemini_content(message) for message in messages]
+        model = self._MODEL_MAP.get(kwargs["model"], kwargs["model"])
 
         config_kwargs: dict[str, Any] = {}
         if kwargs.get("max_tokens") is not None:
@@ -68,7 +75,7 @@ class GeminiClient:
             config_kwargs["system_instruction"] = system
 
         response = await self._client.aio.models.generate_content(
-            model=kwargs["model"],
+            model=model,
             contents=contents,
             config=types.GenerateContentConfig(**config_kwargs),
         )
