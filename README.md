@@ -139,7 +139,7 @@ memhall 內建 hybrid search、provenance / upstream tracking、HMAC auth、CJK 
 
 ## Quick Start
 
-需求：Python 3.11+、Anthropic API key。
+需求：Python 3.11+、一組 LLM API key（Anthropic Claude 或 Google AI Studio Gemini）。
 
 ```bash
 git clone https://github.com/MakiDevelop/VirtualMe.git
@@ -150,7 +150,7 @@ pip install -e ".[dev]"
 
 # 設定環境變數
 cp .env.example .env
-# 編輯 .env，填 ANTHROPIC_API_KEY
+# 編輯 .env，選擇 LLM_PROVIDER 並填入對應 API key
 
 # 初始化資料庫
 python scripts/init_db.py --path ./data/virtualme.db
@@ -158,6 +158,24 @@ python scripts/init_db.py --path ./data/virtualme.db
 # Phase 0：CLI 跑一輪訪談（不接 LINE）
 python -m virtualme.cli --interviewee yourself
 ```
+
+### LLM provider 選擇
+
+預設使用 Anthropic Claude：
+
+```env
+LLM_PROVIDER=anthropic
+ANTHROPIC_API_KEY=sk-ant-xxx
+```
+
+也可以改用 Google AI Studio / Gemini：
+
+```env
+LLM_PROVIDER=gemini
+GEMINI_API_KEY=your_google_ai_studio_key
+```
+
+`GOOGLE_API_KEY` 也可作為 `GEMINI_API_KEY` 的別名。模型 tier 可用 `VIRTUALME_MODEL_FAST`、`VIRTUALME_MODEL_STANDARD`、`VIRTUALME_MODEL_DEEP` 覆寫；細節見 [`docs/LLM_PROVIDERS.md`](docs/LLM_PROVIDERS.md)。
 
 ### 本機 demo flow
 
@@ -253,7 +271,7 @@ MIT — see [LICENSE](LICENSE)。
 ## 致謝
 
 - Stanford 研究團隊 + Joon Park 等人提供 interview-based agent extraction 學術基礎
-- Anthropic 提供 Claude API（也是 VirtualMe 的核心 LLM）
+- Anthropic / Google 提供可選的 LLM API provider
 - 所有願意花 8 週讓 bot 訪談自己的人
 
 ## 貢獻
