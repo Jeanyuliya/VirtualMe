@@ -5,7 +5,15 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 
-    anthropic_api_key: SecretStr
+    llm_provider: str = Field(
+        "anthropic",
+        validation_alias=AliasChoices("llm_provider", "LLM_PROVIDER", "VIRTUALME_LLM_PROVIDER"),
+    )
+    anthropic_api_key: SecretStr | None = None
+    gemini_api_key: SecretStr | None = Field(
+        None,
+        validation_alias=AliasChoices("gemini_api_key", "GEMINI_API_KEY", "GOOGLE_API_KEY"),
+    )
     line_channel_access_token: SecretStr | None = None
     line_channel_secret: SecretStr | None = None
     responder_line_channel_access_token: SecretStr | None = None
