@@ -8,9 +8,9 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from anthropic import AsyncAnthropic
 
 from virtualme.config import Settings
+from virtualme.llm import build_llm_client
 from virtualme.responder.core import ResponderResult, respond
 from virtualme.responder.persona import load_persona
 
@@ -99,10 +99,7 @@ async def main() -> None:
     args = parser.parse_args()
 
     settings = Settings()
-    claude = AsyncAnthropic(
-        api_key=settings.anthropic_api_key.get_secret_value(),
-        max_retries=4,
-    )
+    claude = build_llm_client(settings)
     scorecard = await build_scorecard(args.persona_dir, claude, settings)
 
     args.out.mkdir(parents=True, exist_ok=True)
