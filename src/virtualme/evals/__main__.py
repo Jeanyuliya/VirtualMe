@@ -4,10 +4,9 @@ import argparse
 import asyncio
 from pathlib import Path
 
-from anthropic import AsyncAnthropic
-
 from virtualme.config import Settings
 from virtualme.evals.harness import load_fixtures, render_scorecard, run_eval
+from virtualme.llm import build_llm_client
 
 
 async def main() -> None:
@@ -21,10 +20,7 @@ async def main() -> None:
     claude = None
     if args.with_llm:
         settings = Settings()
-        claude = AsyncAnthropic(
-            api_key=settings.anthropic_api_key.get_secret_value(),
-            max_retries=4,
-        )
+        claude = build_llm_client(settings)
 
     report = await run_eval(cases, claude=claude)
     args.out.mkdir(parents=True, exist_ok=True)
